@@ -12,7 +12,7 @@ Single-player cyber-heist card game on GitHub Pages: the human plays the Ghost o
 - The player is one person (Jason). No multiplayer, accounts or backend. API keys stay in the browser's localStorage and go straight to the provider.
 
 ## Workflow
-- Run `npm run typecheck && npm test` before every commit (about 50s; includes 500 seeded bot games).
+- Run `npm run typecheck && npm test` before every commit (about 20s; includes 500 seeded bot games).
 - Every rule or card change gets a unit test. `tests/cards.test.ts` fails if a card in `data/cards.json` has no test block.
 - Reproduce engine or bot bugs with `npx vite-node scripts/debug-seed.ts SEED`. Check balance with `npx vite-node scripts/sim.ts 500`.
 - Work one task at a time from `HANDOFF.md`, in order. Commit per task with a clear message.

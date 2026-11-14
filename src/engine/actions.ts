@@ -3,7 +3,7 @@
 import { cardOf, ensureCards, nameOf } from './cards';
 import { conditionHolds, isLegal } from './legal';
 import { randInt, shuffle } from './rng';
-import { actor, available, corpSources, currentIce, findInstalled, ghostSources, iceStrength, link, maxHand, nodeName, nodeOf, points, recurringFor, rigOf, rigSum } from './state';
+import { actor, available, cloneState, corpSources, currentIce, findInstalled, ghostSources, iceStrength, link, maxHand, nodeName, nodeOf, points, recurringFor, rigOf, rigSum } from './state';
 import {
   CYCLES,
   POINTS_TO_WIN,
@@ -796,7 +796,7 @@ export function apply(state: GameState, action: Action): Result {
   ensureCards(state);
   if (state.phase === 'gameOver') return { ok: false, error: 'The game is over.' };
   if (!isLegal(state, action)) return { ok: false, error: explain(state, action) };
-  const s = structuredClone(state);
+  const s = cloneState(state);
   step(s, action);
   return { ok: true, state: s };
 }

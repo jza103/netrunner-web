@@ -63,6 +63,19 @@ export function newGame(opts: NewGameOptions): GameState {
   return s;
 }
 
+/**
+ * A copy of the state that is safe to change. The event log and the card setup are never changed
+ * once written (events are only appended, as new objects), so the copy shares those objects and
+ * gets its own events array. Deep-copying them made long games slow.
+ */
+export function cloneState(s: GameState): GameState {
+  const { events, setup, ...rest } = s;
+  const c = structuredClone(rest) as GameState;
+  c.events = events.slice();
+  c.setup = setup;
+  return c;
+}
+
 export const CENTRAL: NodeId[] = ['command', 'mainframe', 'dump'];
 
 export function isSite(id: NodeId): boolean {

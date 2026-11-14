@@ -24,7 +24,7 @@ docker compose up
 1. Install Node 22 LTS
 2. `npm ci`
 3. `npm run dev` and open http://localhost:5173/netrunner-web/
-4. `npm test` runs every test (about 50 seconds; it includes 500 bot-vs-bot games)
+4. `npm test` runs every test (about 20 seconds; it includes 500 bot-vs-bot games)
 5. `npm run build` writes the static site to `dist/`
 
 **Deploy.** `.github/workflows/deploy.yml` builds and publishes to GitHub Pages on every push to `main` (it runs the tests first). In the repo settings, set Pages → Source to "GitHub Actions". The site lands at `https://jza103.github.io/netrunner-web/`.
@@ -72,7 +72,7 @@ src/engine/
 - **Card packs** travel inside the state (`state.setup`): the custom card definitions and both deck lists. Custom ids are namespaced by a hash of the card's content (`x1a2b3c4d-my-card`), so `ensureCards(state)` can add them to the lookup without making `apply` depend on anything but its input. The other side's deck list is removed from each side's view.
 - The UI draws only from `viewFor(state, human)`, and the bot is only ever handed `viewFor(state, botSide)`.
 
-Debugging: `npx vite-node scripts/debug-seed.ts SEED` prints a full bot-vs-bot game; `npx vite-node scripts/sim.ts 500 [easy|normal|hard]` prints win statistics. The bot plays at Easy, Normal or Hard (start screen; Normal by default).
+Debugging: `npx vite-node scripts/debug-seed.ts SEED` prints a full bot-vs-bot game; `npx vite-node scripts/sim.ts 500 [easy|normal|hard]` prints win statistics; `npx vite-node scripts/debug-report.ts report.json` replays a debug report copied from the app's error screen. The bot plays at Easy, Normal or Hard (start screen; Normal by default).
 
 ## Rulings and interpretations
 
@@ -118,5 +118,5 @@ Where the rules or a card could be read two ways, this is what the engine does.
 ## Status
 
 - Engine, 4 identities and 57 card designs, upgrades, three damage kinds, Corp activation during runs, traces and link, bad publicity, recurring credits, viruses and purging, bypass, hosting, an in-app deck builder, custom card packs, both bots, UI with save/resume, the Operator, Docker and the Pages workflow are done.
-- 156 tests pass: every rule, one test block per card (with a check that no card is untested), hidden-information and Operator-leak tests, card pack checks and 40 bot games with the sample pack, random-play fuzzing, and 500 seeded bot-vs-bot games with invariant checks after every action.
+- 161 tests pass: every rule, one test block per card (with a check that no card is untested), hidden-information and Operator-leak tests, card pack checks and 40 bot games with the sample pack, random-play fuzzing, and 500 seeded bot-vs-bot games with invariant checks after every action.
 - Not verified here: a live Operator call (no API key in the build environment) and the GitHub Pages deploy (it needs Pages switched on in the repo settings).

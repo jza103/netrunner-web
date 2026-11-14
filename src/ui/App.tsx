@@ -1,3 +1,4 @@
+import { Component, type ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import rulesRaw from '../../reference/RULES.md?raw';
 import { apply } from '../engine/actions';
@@ -9,7 +10,7 @@ import { eventText, viewFor } from '../engine/view';
 import { CYCLES, POINTS_TO_WIN, type Action, type CardDef, type CardId, type GameSetup, type GameState, type Installed, type NodeState, type Side } from '../engine/types';
 import { botStep } from '../bots/driver';
 import { describeAction, icon, stats, typeLabel } from './describe';
-import { SPEED_MS, type Settings, loadGame, loadPackSetup, loadSettings, saveGame, savePackSetup, saveSettings } from './storage';
+import { SPEED_MS, type Settings, loadGame, loadPackSetup, loadSettings, saveGame, savePackSetup, saveSettings, setCurrentShape, stateShape } from './storage';
 import { type GmSettings, GmPanel, GmSettingsSheet, ProviderFields, loadGmSettings, loadKey, saveGmSettings, saveKey, useBuiltIn, useGm } from './operator';
 import { recap } from './recap';
 import { play, soundFor } from './sound';
@@ -21,9 +22,13 @@ const sideName = (side: Side) => (side === 'corp' ? 'Corp' : 'Ghost');
 // ---------------------------------------------------------------------------
 
 export function App() {
-  const [state, setState] = useState<GameState | null>(() => loadGame());
+  const [loaded] = useState(() => {
+    setCurrentShape(stateShape(newGame({ seed: 0, human: 'ghost' })));
+    return loadGame();
+  });
+  const [state, setState] = useState<GameState | null>(loaded.state);
   const [settings, setSettings] = useState<Settings>(() => loadSettings());
-  const [screen, setScreen] = useState<'new' | 'game'>(() => (loadGame() ? 'game' : 'new'));
+  const [screen, setScreen] = useState<'new' | 'game'>(loaded.state ? 'game' : 'new');
   const [gmSettings, setGmSettings] = useState<GmSettings>(() => loadGmSettings());
 
   useEffect(() => saveSettings(settings), [settings]);
@@ -35,6 +40,7 @@ export function App() {
       <NewGame
         settings={settings}
         setSettings={setSettings}
+        notice={loaded.discarded}
         canContinue={!!state && state.phase !== 'gameOver'}
         onContinue={() => setScreen('game')}
         gmSettings={gmSettings}
@@ -45,14 +51,75 @@ export function App() {
         }}
       />
     );
-  return <Game state={state} setState={setState} settings={settings} setSettings={setSettings} gmSettings={gmSettings} setGmSettings={setGmSettings} onNew={() => setScreen('new')} />;
+  const startOver = () => {
+    setState(null);
+    setScreen('new');
+  };
+  return (
+    <Guard state={state} onNew={startOver}>
+      <Game state={state} setState={setState} settings={settings} setSettings={setSettings} gmSettings={gmSettings} setGmSettings={setGmSettings} onNew={() => setScreen('new')} />
+    </Guard>
+  );
 }
+
+// ---------------------------------------------------------------------------
+// When something breaks
+// ---------------------------------------------------------------------------
+
+/** Turns an engine, bot or render error into a recovery screen instead of a blank page. */
+class Guard extends Component<{ state: GameState; onNew: () => void; children: ComponentChildren }, { error: string | null }> {
+  state = { error: null as string | null };
+  static getDerivedStateFromError(e: unknown) {
+    return { error: e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e) };
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return <Crash error={this.state.error} state={this.props.state} onNew={() => { this.setState({ error: null }); this.props.onNew(); }} />;
+  }
+}
+
+function Crash({ error, state, onNew }: { error: string; state: GameState; onNew: () => void }) {
+  const [copied, setCopied] = useState('');
+  const report = JSON.stringify({ error, gameId: state.gameId, turn: state.turnNumber, lastAction: state.events.at(-1)?.text, state }, null, 1);
+  return (
+    <main class="newgame">
+      <section class="panel errors">
+        <h2>The game hit a bug</h2>
+        <p>
+          The rules engine or the bot ran into something it could not handle, so the game stopped instead of making an illegal move. Your saved game is unchanged.
+        </p>
+        <p class="small">
+          Copy the debug report and send it to Claude in the repo session: it holds the exact game, so the bug can be replayed and fixed.
+        </p>
+        <pre class="small crash">{error.split('\n')[0]}</pre>
+        <div class="row wrap">
+          <button
+            onClick={() =>
+              navigator.clipboard.writeText(report).then(
+                () => setCopied('Copied.'),
+                () => setCopied('Copying is blocked here; select the report below and copy it.'),
+              )
+            }
+          >
+            📋 Copy debug report
+          </button>
+          <button class="primary" onClick={onNew}>
+            ⚡ Start a new game
+          </button>
+        </div>
+        {copied && <p class="small">{copied}</p>}
+        <textarea class="crash" rows={6} readOnly value={report} />
+      </section>
+    </main>
+  );
+}
+
 
 // ---------------------------------------------------------------------------
 // New game
 // ---------------------------------------------------------------------------
 
-function NewGame(props: { settings: Settings; setSettings: (s: Settings) => void; canContinue: boolean; onContinue: () => void; onStart: (s: GameState) => void; gmSettings: GmSettings; setGmSettings: (s: GmSettings) => void }) {
+function NewGame(props: { notice?: string; settings: Settings; setSettings: (s: Settings) => void; canContinue: boolean; onContinue: () => void; onStart: (s: GameState) => void; gmSettings: GmSettings; setGmSettings: (s: GmSettings) => void }) {
   const [side, setSide] = useState<Side>('ghost');
   const [help, setHelp] = useState(false);
   const gm = props.gmSettings.enabled;
@@ -87,6 +154,7 @@ function NewGame(props: { settings: Settings; setSettings: (s: Settings) => void
         <span class="glitch">BREACHLINE</span>
       </h1>
       <p class="muted">A cyber-heist card game for one. Break in as the Ghost, or lock it down as the Corp. First to {POINTS_TO_WIN} project points wins.</p>
+      {props.notice && !props.canContinue && <p class="panel notice">{props.notice} Start a new game below.</p>}
       {props.canContinue && (
         <button class="primary wide" onClick={props.onContinue}>
           ▶️ Continue saved game
@@ -196,13 +264,20 @@ function Game(props: {
   const [sheet, setSheet] = useState<Sheet>(null);
   const [notice, setNotice] = useState('');
   const gm = useGm(state, props.gmSettings);
+  // errors in timers never reach the Guard on their own: hold them and throw while rendering
+  const [failure, setFailure] = useState<unknown>(null);
+  if (failure) throw failure;
 
   // the bot plays the other side, one step at a time
   useEffect(() => {
     if (!who || myMove) return;
     const t = setTimeout(() => {
-      const r = botStep(state, (side) => side !== me, settings.level);
-      if (r) setState(r.state);
+      try {
+        const r = botStep(state, (side) => side !== me, settings.level);
+        if (r) setState(r.state);
+      } catch (e) {
+        setFailure(e);
+      }
     }, SPEED_MS[settings.speed]);
     return () => clearTimeout(t);
   }, [state, settings.speed]);
@@ -215,7 +290,13 @@ function Game(props: {
   }, [state.seq]);
 
   const act = (a: Action) => {
-    const r = apply(state, a);
+    let r: ReturnType<typeof apply>;
+    try {
+      r = apply(state, a);
+    } catch (e) {
+      setFailure(e);
+      return;
+    }
     setSheet(null);
     if (!r.ok) {
       setNotice(r.error);

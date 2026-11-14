@@ -255,3 +255,6 @@ label.button:hover { border-color: var(--accent); }
 .stepper button { min-height: 32px; min-width: 32px; padding: 0; text-align: center; }
 .stepper b { min-width: 1.2em; text-align: center; }
 .sheet ul.errors { color: var(--bad); }
+.notice { border-color: var(--hot); color: var(--hot); }
+.crash { white-space: pre-wrap; word-break: break-word; overflow-x: auto; max-width: 100%; }
+textarea.crash { width: 100%; font: 12px var(--mono); background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }

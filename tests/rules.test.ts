@@ -619,3 +619,18 @@ describe('identities', () => {
     expect(maxHand(s, 'ghost')).toBe(6);
   });
 });
+
+describe('state copies', () => {
+  it('apply and viewFor share the event log and setup but never change them', () => {
+    const s = blank();
+    const events = s.events.slice();
+    const decks = JSON.stringify(s.setup.decks);
+    const next = act(s, { type: 'credit' });
+    expect(s.events).toEqual(events);
+    expect(next.events.length).toBe(events.length + 1);
+    expect(next.events[0]).toBe(s.events[0]); // shared, not copied
+    const v = viewFor(s, 'ghost');
+    expect(v.setup.decks.corp).toEqual({});
+    expect(JSON.stringify(s.setup.decks)).toBe(decks); // the hidden deck list was removed from the view only
+  });
+});

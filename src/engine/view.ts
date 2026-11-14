@@ -1,12 +1,13 @@
 // What one side may know. Bots and the Operator only ever get a view, never the real state.
+import { cloneState } from './state';
 import type { CardId, GameState, Installed, Side } from './types';
 
 /** The state as `side` sees it: the other side's hidden cards become "?…" placeholders. */
 export function viewFor(state: GameState, side: Side): GameState {
-  const v = structuredClone(state);
+  const v = cloneState(state);
   v.rngState = 0;
   // the other side's deck list is private; card definitions stay so revealed cards can be shown
-  v.setup.decks = { ...v.setup.decks, [side === 'corp' ? 'ghost' : 'corp']: {} };
+  v.setup = { ...v.setup, decks: { ...v.setup.decks, [side === 'corp' ? 'ghost' : 'corp']: {} } };
   const hide = (list: CardId[], tag: string) => list.map((_, i) => `?${tag}${i}`);
   v.corp.deck = hide(v.corp.deck, 'deck');
   v.ghost.deck = hide(v.ghost.deck, 'gdeck');

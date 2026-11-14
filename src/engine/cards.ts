@@ -22,7 +22,8 @@ export function isHidden(id: CardId): boolean {
 }
 
 export function defId(id: CardId): string {
-  return id.split('#')[0];
+  const i = id.indexOf('#');
+  return i < 0 ? id : id.slice(0, i);
 }
 
 export function hasDef(id: string): boolean {

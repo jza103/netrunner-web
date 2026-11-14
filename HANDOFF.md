@@ -79,10 +79,15 @@ Play at least three full games as each side on a phone. Things to look at:
 - The Ghost does not count the Corp's cycles for a project installed and scored in one turn. About a third of scores are like that; only central pressure stops them.
 - The Ghost rarely hosts programs, and never scraps programs to free RAM.
 
-### 4. Hardening
-- The soak test takes about 30 seconds, mostly `structuredClone` of a growing event list. If it gets in the way, cap `events` or move the log out of the cloned state.
-- Done: `tests/fuzz.test.ts` plays 60 games of uniformly random legal actions on both sides. It checks the invariants after every step, that `apply` never mutates its input, and that every listed action applies.
-- Saved games have no version field beyond the storage key (`breachline:save:v2`, bumped for upgrades, damage kinds and card packs). Bump the key if `GameState` changes shape again.
+### 4. Hardening (done, Nov 2026)
+- **Speed.** `npm test` went from about 49 to 18 seconds. Copies of the state now share the event log and the card setup, which are never changed once written; each copy gets its own events array. A test pins this down, and the fuzz test still checks that `apply` never changes its input.
+- **Fuzzing.** `tests/fuzz.test.ts` plays 60 games of random legal actions with the built-in set; `tests/pack.test.ts` does the same with the sample pack.
+- **Saves.** Saves are `{ format, state }` under `breachline:save`, with `SAVE_FORMAT` in `src/ui/storage.ts`.
+  - Loading checks the format and the state's shape. A save that does not fit is set aside, with a notice on the start screen.
+  - An old `breachline:save:v2` save is carried over if it still fits, and the old key is removed.
+  - `tests/save.test.ts` fails when `GameState` changes shape without a `SAVE_FORMAT` bump.
+- **Crashes.** An engine, bot or render error now shows a recovery screen instead of a blank page. It has a copyable debug report (error plus full state) and a new-game button.
+  - `npx vite-node scripts/debug-report.ts report.json` replays a report.
 
 ### 5. Nice to have
 - Card art placeholders and a little animation on runs.

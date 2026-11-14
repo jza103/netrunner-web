@@ -3,7 +3,15 @@ import { ensureCards } from '../engine/cards';
 import type { BotLevel } from '../bots/bot';
 import type { GameSetup, GameState } from '../engine/types';
 
-const KEY = 'breachline:save:v2'; // v2: upgrades, damage kinds, card packs
+/**
+ * Saves are { format, state }. Bump SAVE_FORMAT whenever GameState changes shape; tests/save.test.ts
+ * fails until you do. A save in another format, or whose state does not have the current shape,
+ * is set aside instead of crashing the app.
+ */
+export const SAVE_FORMAT = 3;
+const KEY = 'breachline:save';
+/** where saves lived before the format field (format 2) */
+const LEGACY_KEY = 'breachline:save:v2';
 const SETTINGS = 'breachline:settings:v1';
 const PACK = 'breachline:pack:v1';
 
@@ -16,22 +24,67 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = { speed: 'normal', sound: true, level: 'normal' };
 
-export function loadGame(): GameState | null {
+/** The field names that make up a state's shape, for checking saves. Maps keyed by card id are not looked into. */
+export function stateShape(s: unknown): string {
+  const o = s as Record<string, Record<string, unknown>> | null;
+  if (!o || typeof o !== 'object') return '';
+  const keys = (x: unknown) => (x && typeof x === 'object' ? Object.keys(x).sort().join(',') : '-');
+  const nodes = (o.corp?.nodes as unknown[] | undefined) ?? [];
+  return [
+    `state:${keys(o)}`,
+    `corp:${keys(o.corp)}`,
+    `ghost:${keys(o.ghost)}`,
+    `flags:${keys(o.flags)}`,
+    `setup:${keys(o.setup)}`,
+    `node:${keys(nodes[0])}`,
+  ].join(' | ');
+}
+
+let currentShape = '';
+/** Set once from a fresh game, so the check always matches the code that is running. */
+export function setCurrentShape(shape: string) {
+  currentShape = shape;
+}
+
+export type LoadResult = { state: GameState | null; discarded?: string };
+
+/** Read a saved game from its stored text. Pure, so it can be tested. */
+export function parseSave(raw: string | null, legacy = false): LoadResult {
+  if (!raw) return { state: null };
+  let data: unknown;
   try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return null;
-    const s = JSON.parse(raw) as GameState;
-    if (!(s && s.corp && s.ghost && s.setup && typeof s.gameId === 'string')) return null;
-    ensureCards(s);
-    return s;
+    data = JSON.parse(raw);
   } catch {
-    return null;
+    return { state: null, discarded: 'The saved game could not be read.' };
+  }
+  const box = data as { format?: number; state?: GameState };
+  const state = legacy ? (data as GameState) : box.state;
+  if (!legacy && box.format !== SAVE_FORMAT) return { state: null, discarded: 'Your saved game is from an older version of Breachline and cannot be resumed.' };
+  if (!state || typeof state.gameId !== 'string' || (currentShape && stateShape(state) !== currentShape))
+    return { state: null, discarded: 'Your saved game is from an older version of Breachline and cannot be resumed.' };
+  ensureCards(state);
+  return { state };
+}
+
+export function loadGame(): LoadResult {
+  try {
+    const now = localStorage.getItem(KEY);
+    if (now) return parseSave(now);
+    const old = localStorage.getItem(LEGACY_KEY);
+    if (!old) return { state: null };
+    // carry an old save over when it still fits; either way the old key goes
+    const r = parseSave(old, true);
+    localStorage.removeItem(LEGACY_KEY);
+    if (r.state) saveGame(r.state);
+    return r;
+  } catch {
+    return { state: null };
   }
 }
 
 export function saveGame(s: GameState | null) {
   try {
-    if (s) localStorage.setItem(KEY, JSON.stringify(s));
+    if (s) localStorage.setItem(KEY, JSON.stringify({ format: SAVE_FORMAT, state: s }));
     else localStorage.removeItem(KEY);
   } catch {
     /* storage full or blocked: the game still works, it just won't resume */
