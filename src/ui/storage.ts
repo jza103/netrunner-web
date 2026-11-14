@@ -1,7 +1,7 @@
 // Save and resume in the browser. Every read and write is guarded: storage can be unavailable.
 import type { GameState } from '../engine/types';
 
-const KEY = 'breachline:save:v1';
+const KEY = 'breachline:save:v2'; // v2: upgrades, damage kinds, card packs
 const SETTINGS = 'breachline:settings:v1';
 
 export interface Settings {

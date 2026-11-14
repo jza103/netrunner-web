@@ -1,12 +1,26 @@
 // apply(state, action): the only way the game changes. Pure: it never touches its input.
-import { cardOf, is, nameOf } from './cards';
-import { isLegal } from './legal';
+// Card behaviour is data (see Effect in types.ts); runEffect() below is the one interpreter for it.
+import { cardOf, ensureCards, nameOf } from './cards';
+import { conditionHolds, isLegal } from './legal';
 import { randInt, shuffle } from './rng';
-import { actor, count, currentIce, findInstalled, maxHand, nodeName, nodeOf, points } from './state';
-import { CYCLES, POINTS_TO_WIN, type Action, type CardId, type GameState, type NodeId, type Result, type Side } from './types';
+import { actor, currentIce, findInstalled, iceStrength, maxHand, nodeName, nodeOf, points, rigOf, rigSum } from './state';
+import {
+  CYCLES,
+  POINTS_TO_WIN,
+  type Action,
+  type CardId,
+  type DamageKind,
+  type Effect,
+  type GameState,
+  type Installed,
+  type NodeId,
+  type Result,
+  type Side,
+} from './types';
 
 const other = (side: Side): Side => (side === 'corp' ? 'ghost' : 'corp');
 const label = (side: Side) => (side === 'corp' ? 'The Corp' : 'The Ghost');
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 function emit(s: GameState, type: string, side: Side | undefined, text: string, priv?: { side: Side; text: string }) {
   s.events.push({ seq: ++s.seq, type, text, ...(side ? { side } : {}), ...(priv ? { priv } : {}) });
@@ -30,7 +44,7 @@ function drawCards(s: GameState, side: Side, n: number): number {
   const got = p.deck.splice(-n).reverse();
   p.hand.push(...got);
   if (got.length)
-    emit(s, 'draw', side, `${label(side)} draws ${got.length} card${got.length === 1 ? '' : 's'}.`, {
+    emit(s, 'draw', side, `${label(side)} draws ${plural(got.length, 'card')}.`, {
       side,
       text: `You draw ${got.map(nameOf).join(', ')}.`,
     });
@@ -41,26 +55,34 @@ function gain(s: GameState, side: Side, n: number) {
   s[side].credits += n;
 }
 
-/** Deal damage to the Ghost: random discards; more damage than cards in hand is fatal. */
-export function damage(s: GameState, n: number, source: string) {
+/**
+ * Deal damage to the Ghost: random discards; more damage than cards in hand is fatal.
+ * Core damage also lowers the Ghost's maximum hand size by 1 per point, for good.
+ */
+export function damage(s: GameState, n: number, source: string, kind: DamageKind = 'net') {
   const g = s.ghost;
-  const shield = Math.max(0, Math.min(n, count(g.gear, 'padded-rig') - s.flags.prevented));
+  // "each turn, prevent the first N": all such cards together cover the first N of this kind per turn
+  const total = rigSum(s, (d) => d.prevent?.[kind]);
+  const shield = Math.max(0, Math.min(n, total - s.flags.prevented[kind]));
   if (shield) {
-    s.flags.prevented += shield;
+    s.flags.prevented[kind] += shield;
     n -= shield;
-    emit(s, 'prevent', 'ghost', `Padded Rig prevents ${shield} damage.`);
+    const by = rigOf(s).filter((c) => cardOf(c).prevent?.[kind]).map(nameOf);
+    emit(s, 'prevent', 'ghost', `${[...new Set(by)].join(' and ')} prevent${by.length === 1 ? 's' : ''} ${shield} ${kind} damage.`);
   }
   if (n <= 0) return;
   if (n > g.hand.length) {
     g.discard.push(...g.hand.splice(0));
-    emit(s, 'damage', 'corp', `${source} deals ${n} damage. The Ghost has too few cards to absorb it.`);
+    emit(s, 'damage', 'corp', `${source} deals ${n} ${kind} damage. The Ghost has too few cards to absorb it.`);
     win(s, 'corp', 'the Ghost is flatlined.');
     return;
   }
   const lost: CardId[] = [];
   for (let i = 0; i < n; i++) lost.push(...g.hand.splice(randInt(s, g.hand.length), 1));
   g.discard.push(...lost);
-  emit(s, 'damage', 'corp', `${source} deals ${n} damage. The Ghost loses ${lost.map(nameOf).join(', ')}.`);
+  if (kind === 'core') g.core += n;
+  const tail = kind === 'core' ? ` Their maximum hand size is now ${maxHand(s, 'ghost')}.` : '';
+  emit(s, 'damage', 'corp', `${source} deals ${n} ${kind} damage. The Ghost loses ${lost.map(nameOf).join(', ')}.${tail}`);
 }
 
 function addHeat(s: GameState, n: number) {
@@ -85,12 +107,138 @@ function removeCorpCard(s: GameState, card: CardId) {
   for (const n of c.nodes) {
     if (n.root?.card === card) n.root = null;
     n.ice = n.ice.filter((i) => i.card !== card);
+    n.upgrades = n.upgrades.filter((i) => i.card !== card);
   }
   s.ghost.known = s.ghost.known.filter((x) => x !== card);
 }
 
 function checkPoints(s: GameState, side: Side) {
   if (points(s, side) >= POINTS_TO_WIN) win(s, side, `${points(s, side)} project points.`);
+}
+
+// ---------------------------------------------------------------------------
+// Effects
+// ---------------------------------------------------------------------------
+
+interface Ctx {
+  /** whose card this is */
+  owner: Side;
+  /** the card's name, for the log */
+  source: string;
+  /** a chosen target card or node, when the card needs one */
+  target?: CardId;
+  node?: NodeId;
+  /** development counters on the card, for perDev amounts */
+  dev?: number;
+}
+
+/** 'stop': nothing more resolves (the run or the game ended). 'pause': the Corp must choose a program to trash. */
+type Flow = 'ok' | 'stop' | 'pause';
+
+function scaled(s: GameState, e: { n: number; perHeat?: number; perDev?: number }, ctx: Ctx): number {
+  return e.n + (e.perHeat ?? 0) * s.ghost.heat + (e.perDev ?? 0) * (ctx.dev ?? 0);
+}
+
+export function runEffect(s: GameState, e: Effect, ctx: Ctx): Flow {
+  const src = ctx.source;
+  switch (e.op) {
+    case 'gain': {
+      const who = e.who ?? ctx.owner;
+      gain(s, who, e.n);
+      emit(s, 'gain', who, `${src}: ${who === 'corp' ? 'the Corp' : 'the Ghost'} gains ${plural(e.n, 'credit')}.`);
+      return 'ok';
+    }
+    case 'draw':
+      drawCards(s, e.who ?? ctx.owner, e.n);
+      return 'ok';
+    case 'damage':
+      damage(s, scaled(s, e, ctx), src, e.kind);
+      return s.phase === 'gameOver' ? 'stop' : 'ok';
+    case 'heat':
+      addHeat(s, e.n);
+      return 'ok';
+    case 'shedHeat': {
+      const n = Math.min(e.n, s.ghost.heat);
+      s.ghost.heat -= n;
+      emit(s, 'heat', 'ghost', `${src}: the Ghost sheds ${n} heat (now ${s.ghost.heat}).`);
+      return 'ok';
+    }
+    case 'loseCredits': {
+      const n = Math.min(scaled(s, e, ctx), s.ghost.credits);
+      s.ghost.credits -= n;
+      emit(s, 'sub', 'corp', `${src}: the Ghost loses ${plural(n, 'credit')}.`);
+      return 'ok';
+    }
+    case 'drain': {
+      const n = Math.min(e.n, s.corp.credits);
+      s.corp.credits -= n;
+      gain(s, 'ghost', n);
+      emit(s, 'heist', 'ghost', `${src}: the Ghost takes ${plural(n, 'credit')} from the Corp.`);
+      return 'ok';
+    }
+    case 'loseCycle': {
+      const n = Math.min(e.n, s.ghost.cycles);
+      s.ghost.cycles -= n;
+      if (n) emit(s, 'sub', 'corp', `${src}: the Ghost loses ${plural(n, 'cycle')}.`);
+      return 'ok';
+    }
+    case 'trashProgram':
+      if (s.ghost.programs.length === 1) trashProgram(s, s.ghost.programs[0]);
+      else if (s.ghost.programs.length > 1) return 'pause';
+      return 'ok';
+    case 'endRun':
+      endRun(s, false, `${src} shuts the Ghost out.`);
+      return 'stop';
+    case 'payOrEndRun':
+      if (s.ghost.credits < e.n) {
+        endRun(s, false, `${src} locks the Ghost out (they cannot pay ${e.n}).`);
+        return 'stop';
+      }
+      s.ghost.credits -= e.n;
+      emit(s, 'sub', 'corp', `${src}: the Ghost pays ${plural(e.n, 'credit')} to get through.`);
+      return 'ok';
+    case 'develop': {
+      const t = findInstalled(s, ctx.target!)!;
+      t.inst.dev += e.n;
+      emit(s, 'develop', 'corp', `The card in ${nodeName(t.node.id)} now has ${plural(t.inst.dev, 'development counter')}.`);
+      return 'ok';
+    }
+    case 'recycleDump': {
+      const c = s.corp;
+      c.deck.push(...c.discard.splice(0));
+      c.discardSeen = [];
+      shuffle(s, c.deck);
+      emit(s, 'recycle', 'corp', `${src}: the Corp shuffles the Dump into the Mainframe.`);
+      return 'ok';
+    }
+    case 'run':
+      startRun(s, e.node === 'any' ? ctx.node! : e.node, { noActivate: e.noActivate, extraAccess: e.extraAccess, instead: e.instead, source: src });
+      return 'stop';
+    case 'reveal': {
+      const g = s.ghost;
+      const n = nodeOf(s, ctx.node!);
+      const seen = [...n.ice, ...n.upgrades, ...(n.root ? [n.root] : [])].filter((i) => !i.active).map((i) => i.card);
+      for (const c of seen) if (!g.known.includes(c)) g.known.push(c);
+      emit(s, 'recon', 'ghost', `The Ghost scans ${nodeName(n.id)}.`, { side: 'ghost', text: `You scan ${nodeName(n.id)} and see: ${seen.map(nameOf).join(', ')}.` });
+      return 'ok';
+    }
+    case 'recover': {
+      const g = s.ghost;
+      g.discard = g.discard.filter((x) => x !== ctx.target);
+      g.hand.push(ctx.target!);
+      emit(s, 'salvage', 'ghost', `The Ghost recovers ${nameOf(ctx.target!)} from the Scrapheap.`);
+      return 'ok';
+    }
+  }
+}
+
+/** Resolve a list of effects in order until one stops or pauses. */
+function runEffects(s: GameState, list: Effect[] | undefined, ctx: Ctx): Flow {
+  for (const e of list ?? []) {
+    const f = runEffect(s, e, ctx);
+    if (f !== 'ok') return f;
+  }
+  return 'ok';
 }
 
 // ---------------------------------------------------------------------------
@@ -101,23 +249,17 @@ function startTurn(s: GameState, side: Side) {
   s.turn = side;
   s.turnNumber++;
   s.phase = 'action';
-  s.flags = { successfulRun: false, skimmed: false, prevented: 0 };
+  s.flags = { successfulRun: false, prevented: { net: 0, meat: 0, core: 0 } };
   s[side].cycles = CYCLES[side];
   emit(s, 'turn', side, `Turn ${s.turnNumber}: ${label(side)} begins with ${CYCLES[side]} cycles.`);
   if (side === 'corp') {
     if (!s.corp.deck.length) return win(s, 'ghost', 'the Corp must draw from an empty Mainframe.');
     drawCards(s, 'corp', 1);
-    const shells = s.corp.nodes.filter((n) => n.root?.active && is(n.root.card, 'shell-company')).length;
-    if (shells) {
-      gain(s, 'corp', shells);
-      emit(s, 'income', 'corp', `Shell Company pays the Corp ${shells} credit${shells === 1 ? '' : 's'}.`);
-    }
+    for (const n of s.corp.nodes)
+      for (const inst of [...(n.root ? [n.root] : []), ...n.upgrades])
+        if (inst.active) runEffects(s, cardOf(inst.card).onTurnStart, { owner: 'corp', source: nameOf(inst.card) });
   } else {
-    const fences = count(s.ghost.contacts, 'street-fence');
-    if (fences) {
-      gain(s, 'ghost', fences);
-      emit(s, 'income', 'ghost', `Street Fence pays the Ghost ${fences} credit${fences === 1 ? '' : 's'}.`);
-    }
+    for (const c of rigOf(s)) runEffects(s, cardOf(c).onTurnStart, { owner: 'ghost', source: nameOf(c) });
   }
 }
 
@@ -128,6 +270,7 @@ function passTurn(s: GameState) {
 
 function endTurn(s: GameState) {
   const side = s.turn;
+  if (side === 'ghost' && maxHand(s, 'ghost') < 0) return win(s, 'corp', 'the Ghost is flatlined: core damage left them a maximum hand size below 0.');
   if (s[side].hand.length > maxHand(s, side)) {
     s.phase = 'discard';
     emit(s, 'discardDown', side, `${label(side)} must discard down to ${maxHand(s, side)} cards.`);
@@ -138,7 +281,14 @@ function endTurn(s: GameState) {
 // Runs
 // ---------------------------------------------------------------------------
 
-function startRun(s: GameState, node: NodeId, opts: { noActivate?: boolean; extraAccess?: number; heist?: boolean } = {}) {
+interface RunOpts {
+  noActivate?: boolean;
+  extraAccess?: number;
+  instead?: Effect[];
+  source?: string;
+}
+
+function startRun(s: GameState, node: NodeId, opts: RunOpts = {}) {
   s.phase = 'run';
   s.run = {
     node,
@@ -151,7 +301,8 @@ function startRun(s: GameState, node: NodeId, opts: { noActivate?: boolean; extr
     accessing: null,
     noActivate: !!opts.noActivate,
     extraAccess: opts.extraAccess ?? 0,
-    heist: !!opts.heist,
+    instead: opts.instead?.length ? opts.instead : null,
+    source: opts.source ?? null,
   };
   emit(s, 'run', 'ghost', `The Ghost runs on ${nodeName(node)}.`);
   advanceRun(s);
@@ -161,7 +312,12 @@ function startRun(s: GameState, node: NodeId, opts: { noActivate?: boolean; extr
 function advanceRun(s: GameState) {
   const run = s.run!;
   for (;;) {
-    if (run.pos < 0) return beginAccess(s);
+    if (run.pos < 0) {
+      // past all the ICE: the Corp's last chance to activate assets and upgrades
+      run.step = 'approachNode';
+      emit(s, 'approachNode', 'ghost', `The Ghost reaches ${nodeName(run.node)}.`);
+      return;
+    }
     const ice = nodeOf(s, run.node).ice[run.pos];
     if (ice.active) return beginEncounter(s);
     if (!run.noActivate && s.corp.credits >= (cardOf(ice.card).cost ?? 0)) {
@@ -173,6 +329,16 @@ function advanceRun(s: GameState) {
   }
 }
 
+/** The Corp is done activating: active upgrades in the node trigger, then the run succeeds. */
+function enterNode(s: GameState) {
+  const run = s.run!;
+  for (const u of [...nodeOf(s, run.node).upgrades]) {
+    if (!u.active) continue;
+    if (runEffects(s, cardOf(u.card).onApproachNode, { owner: 'corp', source: nameOf(u.card), node: run.node }) !== 'ok') return;
+  }
+  beginAccess(s);
+}
+
 function beginEncounter(s: GameState) {
   const run = s.run!;
   run.step = 'encounter';
@@ -180,7 +346,8 @@ function beginEncounter(s: GameState) {
   run.broken = [];
   const ice = currentIce(s)!;
   const d = cardOf(ice.card);
-  emit(s, 'encounter', 'ghost', `The Ghost encounters ${d.name} (${d.subtype}, strength ${d.strength}).`);
+  const str = iceStrength(s, ice.card);
+  emit(s, 'encounter', 'ghost', `The Ghost encounters ${d.name} (${d.subtype}, strength ${str}${str !== d.strength ? `, boosted from ${d.strength}` : ''}).`);
 }
 
 function endRun(s: GameState, success: boolean, why = '') {
@@ -195,40 +362,11 @@ function resolveSubs(s: GameState) {
   const ice = currentIce(s)!;
   const d = cardOf(ice.card);
   while (run.subQueue.length) {
-    const sub = d.subs![run.subQueue.shift()!];
-    switch (sub.op) {
-      case 'endRun':
-        return endRun(s, false, `${d.name} shuts the Ghost out.`);
-      case 'damage':
-        damage(s, sub.n, d.name);
-        if (s.phase === 'gameOver') return;
-        break;
-      case 'loseCredits': {
-        const n = Math.min(sub.n, s.ghost.credits);
-        s.ghost.credits -= n;
-        emit(s, 'sub', 'corp', `${d.name}: the Ghost loses ${n} credit${n === 1 ? '' : 's'}.`);
-        break;
-      }
-      case 'corpGain':
-        gain(s, 'corp', sub.n);
-        emit(s, 'sub', 'corp', `${d.name}: the Corp gains ${sub.n} credits.`);
-        break;
-      case 'heat':
-        addHeat(s, sub.n);
-        break;
-      case 'loseCycle': {
-        const n = Math.min(sub.n, s.ghost.cycles);
-        s.ghost.cycles -= n;
-        if (n) emit(s, 'sub', 'corp', `${d.name}: the Ghost loses ${n} cycle.`);
-        break;
-      }
-      case 'trashProgram':
-        if (s.ghost.programs.length === 1) trashProgram(s, s.ghost.programs[0]);
-        else if (s.ghost.programs.length > 1) {
-          run.step = 'corpTrash';
-          return;
-        }
-        break;
+    const f = runEffect(s, d.subs![run.subQueue.shift()!], { owner: 'corp', source: d.name });
+    if (f === 'stop') return;
+    if (f === 'pause') {
+      run.step = 'corpTrash';
+      return;
     }
   }
   run.step = 'passed';
@@ -238,36 +376,29 @@ function resolveSubs(s: GameState) {
 function beginAccess(s: GameState) {
   const run = s.run!;
   const c = s.corp;
+  const first = !s.flags.successfulRun;
   s.flags.successfulRun = true;
   emit(s, 'success', 'ghost', `The run on ${nodeName(run.node)} succeeds.`);
-  if (!s.flags.skimmed && count(s.ghost.programs, 'packet-skimmer')) {
-    s.flags.skimmed = true;
-    gain(s, 'ghost', 2);
-    emit(s, 'income', 'ghost', 'Packet Skimmer pays the Ghost 2 credits.');
-  }
-  if (run.heist) {
-    const n = Math.min(4, c.credits);
-    c.credits -= n;
-    gain(s, 'ghost', n);
-    emit(s, 'heist', 'ghost', `Payroll Heist: the Ghost takes ${n} credit${n === 1 ? '' : 's'} from the Corp.`);
-    addHeat(s, 1);
+  if (first) for (const card of rigOf(s)) runEffects(s, cardOf(card).onFirstSuccessfulRun, { owner: 'ghost', source: nameOf(card) });
+  if (run.instead) {
+    runEffects(s, run.instead, { owner: 'ghost', source: run.source ?? 'The run' });
     return endRun(s, true);
   }
+  const node = nodeOf(s, run.node);
   if (run.node === 'command') {
     const pool = [...c.hand];
     for (let i = 0; i < 1 + run.extraAccess && pool.length; i++) run.accessQueue.push(...pool.splice(randInt(s, pool.length), 1));
   } else if (run.node === 'mainframe') {
-    const n = 1 + run.extraAccess + count(s.ghost.programs, 'deep-probe');
+    const n = 1 + run.extraAccess + rigSum(s, (d) => d.mainframeAccess);
     run.accessQueue = c.deck.slice(-n).reverse();
   } else if (run.node === 'dump') {
     c.discardSeen = [...c.discard];
     run.accessQueue = c.discard.filter((x) => cardOf(x).type === 'project');
-    if (!run.accessQueue.length) emit(s, 'access', 'ghost', `The Ghost sifts the Dump (${c.discard.length} cards) and finds no projects.`);
-  } else {
-    const root = nodeOf(s, run.node).root;
-    if (root) run.accessQueue = [root.card];
-    else emit(s, 'access', 'ghost', 'There is nothing installed there.');
-  }
+    if (!run.accessQueue.length) emit(s, 'access', 'ghost', `The Ghost sifts the Dump (${plural(c.discard.length, 'card')}) and finds no projects.`);
+  } else if (node.root) run.accessQueue = [node.root.card];
+  // upgrades in the node are accessed too
+  run.accessQueue.push(...node.upgrades.map((u) => u.card));
+  if (!run.accessQueue.length && run.node !== 'dump') emit(s, 'access', 'ghost', 'There is nothing to access there.');
   run.step = 'access';
   nextAccess(s);
 }
@@ -280,69 +411,35 @@ function nextAccess(s: GameState) {
   const d = cardOf(card);
   const inst = findInstalled(s, card);
   emit(s, 'access', 'ghost', inst?.inst.active ? `The Ghost accesses ${d.name}.` : 'The Ghost accesses a card.', { side: 'ghost', text: `You access ${d.name}.` });
-  if (d.trap && inst) {
-    emit(s, 'trap', 'corp', `It is a trap: ${d.name}!`);
-    inst.inst.active = true;
-    damage(s, 2 + inst.inst.dev, d.name);
+  if (inst && d.onAccess?.length) {
+    if (d.trap) {
+      emit(s, 'trap', 'corp', `It is a trap: ${d.name}!`);
+      inst.inst.active = true;
+    }
+    runEffects(s, d.onAccess, { owner: 'corp', source: d.name, dev: inst.inst.dev });
   }
 }
 
 // ---------------------------------------------------------------------------
-// Card effects
+// Playing and installing cards
 // ---------------------------------------------------------------------------
 
-function playDirective(s: GameState, a: Extract<Action, { type: 'play' }>) {
-  const c = s.corp;
+function playCard(s: GameState, a: Extract<Action, { type: 'play' }>) {
+  const side = cardOf(a.card).side;
+  const p = s[side];
   const d = cardOf(a.card);
-  c.cycles--;
-  c.credits -= d.cost ?? 0;
-  c.hand = c.hand.filter((x) => x !== a.card);
-  emit(s, 'play', 'corp', `The Corp plays ${d.name}.`);
-  if (is(a.card, 'recall')) {
-    c.removed.push(a.card);
-    c.deck.push(...c.discard.splice(0));
-    c.discardSeen = [];
-    shuffle(s, c.deck);
-    return;
+  p.cycles--;
+  p.credits -= d.cost ?? 0;
+  p.hand = p.hand.filter((x) => x !== a.card);
+  if (d.removeAfterPlay) {
+    if (side === 'corp') s.corp.removed.push(a.card);
+    else s.ghost.discard.push(a.card);
+  } else {
+    p.discard.push(a.card);
+    if (side === 'corp') s.corp.discardSeen.push(a.card);
   }
-  c.discard.push(a.card);
-  c.discardSeen.push(a.card);
-  if (is(a.card, 'quarterly-windfall')) gain(s, 'corp', 7);
-  else if (is(a.card, 'rapid-prototyping')) {
-    const t = findInstalled(s, a.target!)!;
-    t.inst.dev += 2;
-    emit(s, 'develop', 'corp', `The card in ${nodeName(t.node.id)} now has ${t.inst.dev} development counters.`);
-  } else if (is(a.card, 'burn-notice')) damage(s, 1 + s.ghost.heat, d.name);
-  else if (is(a.card, 'asset-freeze')) {
-    const n = Math.min(s.ghost.credits, 3 * s.ghost.heat);
-    s.ghost.credits -= n;
-    emit(s, 'freeze', 'corp', `The Ghost loses ${n} credit${n === 1 ? '' : 's'}.`);
-  } else if (is(a.card, 'lockdown-audit')) addHeat(s, 1);
-}
-
-function playStunt(s: GameState, a: Extract<Action, { type: 'play' }>) {
-  const g = s.ghost;
-  const d = cardOf(a.card);
-  g.cycles--;
-  g.credits -= d.cost ?? 0;
-  g.hand = g.hand.filter((x) => x !== a.card);
-  g.discard.push(a.card);
-  emit(s, 'play', 'ghost', `The Ghost plays ${d.name}.`);
-  if (is(a.card, 'fast-money')) gain(s, 'ghost', 5);
-  else if (is(a.card, 'cram-session')) drawCards(s, 'ghost', 3);
-  else if (is(a.card, 'payroll-heist')) startRun(s, 'command', { heist: true });
-  else if (is(a.card, 'deep-dive')) startRun(s, 'mainframe', { extraAccess: 2 });
-  else if (is(a.card, 'blackout')) startRun(s, a.node!, { noActivate: true });
-  else if (is(a.card, 'recon-sweep')) {
-    const n = nodeOf(s, a.node!);
-    const seen = [...n.ice, ...(n.root ? [n.root] : [])].filter((i) => !i.active).map((i) => i.card);
-    for (const c of seen) if (!g.known.includes(c)) g.known.push(c);
-    emit(s, 'recon', 'ghost', `The Ghost scans ${nodeName(a.node!)}.`, { side: 'ghost', text: `You scan ${nodeName(a.node!)} and see: ${seen.map(nameOf).join(', ')}.` });
-  } else if (is(a.card, 'salvage')) {
-    g.discard = g.discard.filter((x) => x !== a.target);
-    g.hand.push(a.target!);
-    emit(s, 'salvage', 'ghost', `The Ghost recovers ${nameOf(a.target!)} from the Scrapheap.`);
-  }
+  emit(s, 'play', side, `${label(side)} plays ${d.name}.`);
+  runEffects(s, d.onPlay, { owner: side, source: d.name, target: a.target, node: a.node });
 }
 
 function corpInstall(s: GameState, a: Extract<Action, { type: 'install' }>) {
@@ -350,7 +447,7 @@ function corpInstall(s: GameState, a: Extract<Action, { type: 'install' }>) {
   const d = cardOf(a.card);
   let node = a.node === 'new' ? null : nodeOf(s, a.node!);
   if (!node) {
-    node = { id: `site${++c.siteCount}`, ice: [], root: null };
+    node = { id: `site${++c.siteCount}`, ice: [], root: null, upgrades: [] };
     c.nodes.push(node);
   }
   c.cycles--;
@@ -360,6 +457,9 @@ function corpInstall(s: GameState, a: Extract<Action, { type: 'install' }>) {
     c.credits -= node.ice.length;
     node.ice.push({ card: a.card, active: false, dev: 0 });
     emit(s, 'install', 'corp', `The Corp installs ICE protecting ${where}.`, { side: 'corp', text: `You install ${d.name} protecting ${where}.` });
+  } else if (d.type === 'upgrade') {
+    node.upgrades.push({ card: a.card, active: false, dev: 0 });
+    emit(s, 'install', 'corp', `The Corp installs a card in ${where}.`, { side: 'corp', text: `You install ${d.name} (upgrade) in ${where}.` });
   } else {
     if (node.root) {
       const old = node.root;
@@ -383,15 +483,51 @@ function ghostInstall(s: GameState, a: Extract<Action, { type: 'install' }>) {
   emit(s, 'install', 'ghost', `The Ghost installs ${d.name}.`);
 }
 
+function useAbility(s: GameState, card: CardId) {
+  const g = s.ghost;
+  const d = cardOf(card);
+  const ab = d.ability!;
+  g.cycles -= ab.cycles;
+  g.credits -= ab.credits ?? 0;
+  if (ab.trashSelf) {
+    g.programs = g.programs.filter((c) => c !== card);
+    g.gear = g.gear.filter((c) => c !== card);
+    g.contacts = g.contacts.filter((c) => c !== card);
+    g.discard.push(card);
+  }
+  emit(s, 'use', 'ghost', `The Ghost ${ab.trashSelf ? 'trashes' : 'uses'} ${d.name}.`);
+  runEffects(s, ab.effects, { owner: 'ghost', source: d.name });
+}
+
+function activate(s: GameState, card: CardId) {
+  const t = findInstalled(s, card)!;
+  const d = cardOf(card);
+  s.corp.credits -= d.cost ?? 0;
+  t.inst.active = true;
+  emit(s, 'activate', 'corp', `The Corp activates ${d.name} (${t.isIce ? 'protecting' : 'in'} ${nodeName(t.node.id)}) for ${d.cost ?? 0}.`);
+  const run = s.run;
+  if (!run) return;
+  if (run.step === 'approach' && t.isIce && currentIce(s)?.card === card) return beginEncounter(s);
+  if (runEffects(s, d.onActivateInRun, { owner: 'corp', source: d.name, node: run.node }) !== 'ok') return;
+  // still approaching ICE it can no longer pay for: the Ghost slips past
+  if (s.run?.step === 'approach') {
+    const ice = currentIce(s)!;
+    if (s.corp.credits < (cardOf(ice.card).cost ?? 0)) {
+      emit(s, 'pass', 'ghost', 'The Ghost slips past inactive ICE.');
+      s.run.pos--;
+      advanceRun(s);
+    }
+  }
+}
+
 function score(s: GameState, card: CardId) {
   const c = s.corp;
   const d = cardOf(card);
+  const inst: Installed | undefined = findInstalled(s, card)?.inst;
   removeCorpCard(s, card);
   c.scored.push(card);
-  emit(s, 'score', 'corp', `The Corp scores ${d.name} for ${d.points} point${d.points === 1 ? '' : 's'} (${points(s, 'corp')} total).`);
-  if (is(card, 'skyhook-contract')) gain(s, 'corp', 4);
-  else if (is(card, 'quiet-acquisition')) drawCards(s, 'corp', 2);
-  else if (is(card, 'orbital-mandate')) addHeat(s, 2);
+  emit(s, 'score', 'corp', `The Corp scores ${d.name} for ${plural(d.points ?? 0, 'point')} (${points(s, 'corp')} total).`);
+  runEffects(s, d.onScore, { owner: 'corp', source: d.name, dev: inst?.dev });
   checkPoints(s, 'corp');
 }
 
@@ -429,7 +565,7 @@ function step(s: GameState, a: Action) {
     case 'install':
       return side === 'corp' ? corpInstall(s, a) : ghostInstall(s, a);
     case 'play':
-      return side === 'corp' ? playDirective(s, a) : playStunt(s, a);
+      return playCard(s, a);
     case 'develop': {
       const t = findInstalled(s, a.card)!;
       s.corp.cycles--;
@@ -440,16 +576,10 @@ function step(s: GameState, a: Action) {
     }
     case 'score':
       return score(s, a.card);
-    case 'activate': {
-      const t = findInstalled(s, a.card)!;
-      const d = cardOf(a.card);
-      s.corp.credits -= d.cost ?? 0;
-      t.inst.active = true;
-      emit(s, 'activate', 'corp', `The Corp activates ${d.name} (${t.isIce ? 'protecting' : 'in'} ${nodeName(t.node.id)}) for ${d.cost ?? 0}.`);
-      if (s.run?.step === 'approach') beginEncounter(s);
-      return;
-    }
+    case 'activate':
+      return activate(s, a.card);
     case 'decline':
+      if (s.run!.step === 'approachNode') return enterNode(s);
       emit(s, 'pass', 'ghost', 'The Corp leaves its ICE inactive; the Ghost slips past.');
       s.run!.pos--;
       return advanceRun(s);
@@ -470,19 +600,7 @@ function step(s: GameState, a: Action) {
       emit(s, 'heat', 'ghost', `The Ghost lies low and sheds 1 heat (now ${s.ghost.heat}).`);
       return;
     case 'use':
-      if (is(a.card, 'burner-phone')) {
-        const g = s.ghost;
-        g.gear = g.gear.filter((c) => c !== a.card);
-        g.discard.push(a.card);
-        const n = Math.min(2, g.heat);
-        g.heat -= n;
-        emit(s, 'heat', 'ghost', `The Ghost burns a Burner Phone and sheds ${n} heat (now ${g.heat}).`);
-      } else {
-        s.ghost.cycles--;
-        emit(s, 'use', 'ghost', 'The Ghost checks in at the Safehouse.');
-        drawCards(s, 'ghost', 2);
-      }
-      return;
+      return useAbility(s, a.card);
     case 'scrap':
       s.ghost.programs = s.ghost.programs.filter((c) => c !== a.card);
       s.ghost.discard.push(a.card);
@@ -555,6 +673,7 @@ function step(s: GameState, a: Action) {
 }
 
 export function apply(state: GameState, action: Action): Result {
+  ensureCards(state);
   if (state.phase === 'gameOver') return { ok: false, error: 'The game is over.' };
   if (!isLegal(state, action)) return { ok: false, error: explain(state, action) };
   const s = structuredClone(state);
@@ -572,8 +691,8 @@ export function explain(s: GameState, a: Action): string {
     const d = cardOf(a.card);
     if ((a.type === 'install' || a.type === 'play' || a.type === 'activate') && p.credits < (d.cost ?? 0)) return `${d.name} costs ${d.cost} and you have ${p.credits}.`;
     if (a.type === 'install' && d.type === 'program') return `Not enough free RAM for ${d.name}.`;
-    if (a.type === 'play' && (is(a.card, 'burn-notice') || is(a.card, 'asset-freeze'))) return `${d.name} needs the Ghost to have heat.`;
-    if (a.type === 'play' && is(a.card, 'lockdown-audit')) return 'Lockdown Audit needs a successful Ghost run last turn.';
+    if (a.type === 'play' && !conditionHolds(s, d.playIf))
+      return d.playIf === 'ghostHasHeat' ? `${d.name} needs the Ghost to have heat.` : `${d.name} needs a successful Ghost run last turn.`;
     if (a.type === 'score') return `${d.name} needs ${d.dev} development counters.`;
     if (a.type === 'break') return 'That breaker is too weak or cannot break this ICE.';
   }

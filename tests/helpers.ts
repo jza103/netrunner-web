@@ -3,14 +3,29 @@ import { expect } from 'vitest';
 import { apply } from '../src/engine/actions';
 import { defId } from '../src/engine/cards';
 import { violations } from '../src/engine/invariants';
+import { legalActions } from '../src/engine/legal';
 import { newGame, nodeOf } from '../src/engine/state';
 import type { Action, CardId, GameState, NodeId, Side } from '../src/engine/types';
 
-export function act(s: GameState, a: Action): GameState {
+/** Apply one action exactly. */
+export function actRaw(s: GameState, a: Action): GameState {
   const r = apply(s, a);
   if (!r.ok) throw new Error(`${JSON.stringify(a)} rejected: ${r.error}`);
   expect(violations(r.state)).toEqual([]);
   return r.state;
+}
+
+/**
+ * Apply one action; then, if a run has reached its node and the Corp has nothing it could
+ * activate, pass the Corp's window for it. Tests of that window use actRaw.
+ */
+export function act(s: GameState, a: Action): GameState {
+  let next = actRaw(s, a);
+  if (next.run?.step === 'approachNode') {
+    const legal = legalActions(next);
+    if (legal.length === 1 && legal[0].type === 'decline') next = actRaw(next, legal[0]);
+  }
+  return next;
 }
 
 export function rejects(s: GameState, a: Action): string {
@@ -57,14 +72,21 @@ export function ice(s: GameState, node: NodeId, def: string, active = true): Car
 export function site(s: GameState, def: string, opts: { dev?: number; active?: boolean } = {}): { id: NodeId; card: CardId } {
   const card = take(s, def);
   const id = `site${++s.corp.siteCount}`;
-  s.corp.nodes.push({ id, ice: [], root: { card, active: !!opts.active, dev: opts.dev ?? 0 } });
+  s.corp.nodes.push({ id, ice: [], root: { card, active: !!opts.active, dev: opts.dev ?? 0 }, upgrades: [] });
   return { id, card };
+}
+
+/** Install an upgrade in a node. */
+export function upgrade(s: GameState, node: NodeId, def: string, active = false): CardId {
+  const c = take(s, def);
+  nodeOf(s, node).upgrades.push({ card: c, active, dev: 0 });
+  return c;
 }
 
 export function rig(s: GameState, ...defs: string[]): CardId[] {
   return defs.map((d) => {
     const c = take(s, d);
-    const zone = ['ram-brick', 'padded-rig', 'burner-phone'].includes(d) ? s.ghost.gear : ['street-fence', 'safehouse'].includes(d) ? s.ghost.contacts : s.ghost.programs;
+    const zone = ['ram-brick', 'padded-rig', 'burner-phone', 'flak-vest'].includes(d) ? s.ghost.gear : ['street-fence', 'safehouse'].includes(d) ? s.ghost.contacts : s.ghost.programs;
     zone.push(c);
     return c;
   });

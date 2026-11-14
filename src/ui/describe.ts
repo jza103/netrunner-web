@@ -1,5 +1,5 @@
 // Words and icons for cards and actions.
-import { cardOf, isHidden, nameOf } from '../engine/cards';
+import { cardOf, effectText, isHidden, nameOf } from '../engine/cards';
 import { findInstalled, nodeName, nodeOf } from '../engine/state';
 import type { Action, CardDef, CardId, GameState } from '../engine/types';
 
@@ -11,6 +11,8 @@ export function icon(d: CardDef): string {
       return d.subtype === 'wall' ? '🧱' : d.subtype === 'cipher' ? '🔐' : '🐺';
     case 'asset':
       return d.trap ? '🪤' : '🏢';
+    case 'upgrade':
+      return '🛡️';
     case 'directive':
       return '📜';
     case 'program':
@@ -70,7 +72,8 @@ export function describeAction(s: GameState, a: Action): string {
       if (d.side === 'ghost') return `⬇️ Install ${d.name} (${d.cost}¢)`;
       const cost = d.type === 'ice' && a.node && a.node !== 'new' ? nodeOf(s, a.node).ice.length : 0;
       const spot = a.node === 'new' ? 'a new site' : nodeName(a.node!);
-      const swap = d.type !== 'ice' && a.node !== 'new' && nodeOf(s, a.node!).root ? ' (trashes what is there)' : '';
+      const swap = d.type !== 'ice' && d.type !== 'upgrade' && a.node !== 'new' && nodeOf(s, a.node!).root ? ' (trashes what is there)' : '';
+      if (d.type === 'upgrade') return `⬇️ Install upgrade in ${spot}`;
       return d.type === 'ice' ? `⬇️ Install protecting ${spot}${cost ? ` (${cost}¢)` : ''}` : `⬇️ Install in ${spot}${swap}`;
     }
     case 'play': {
@@ -85,7 +88,7 @@ export function describeAction(s: GameState, a: Action): string {
     case 'activate':
       return `💡 Activate ${label(a.card)} (${cardOf(a.card).cost ?? 0}¢)`;
     case 'decline':
-      return '🙈 Leave it inactive';
+      return s.run?.step === 'approachNode' ? '🙈 Activate nothing: let the Ghost in' : '🙈 Leave it inactive';
     case 'trashContact':
       return `🔥 Trash their ${label(a.card)} (2¢)`;
     case 'run':
@@ -93,7 +96,12 @@ export function describeAction(s: GameState, a: Action): string {
     case 'shedHeat':
       return '🧊 Shed 1 heat (2¢)';
     case 'use':
-      return cardOf(a.card).id === 'burner-phone' ? '📱 Burn a Burner Phone: shed 2 heat (free)' : '🏠 Safehouse: draw 2';
+    {
+      const d = cardOf(a.card);
+      const ab = d.ability!;
+      const cost = [ab.cycles ? `${ab.cycles} cycle` : 'no cycle', ab.credits ? `${ab.credits}¢` : '', ab.trashSelf ? 'trash it' : ''].filter(Boolean).join(', ');
+      return `✨ ${d.name}: ${ab.effects.map((e) => effectText(e, 'ghost')).join(' ')} (${cost})`;
+    }
     case 'scrap':
       return `🗑️ Scrap ${label(a.card)} (free)`;
     case 'boost': {

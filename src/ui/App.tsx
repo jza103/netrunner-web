@@ -3,7 +3,7 @@ import rulesRaw from '../../reference/RULES.md?raw';
 import { apply } from '../engine/actions';
 import { CARDS, cardOf, fullText, isHidden, subText } from '../engine/cards';
 import { legalActions } from '../engine/legal';
-import { actor, breakerStrength, currentIce, findInstalled, maxHand, newGame, nodeName, points, ramLimit, ramUsed } from '../engine/state';
+import { actor, breakerStrength, currentIce, findInstalled, iceStrength, maxHand, newGame, nodeName, points, ramLimit, ramUsed } from '../engine/state';
 import { eventText, viewFor } from '../engine/view';
 import { CYCLES, POINTS_TO_WIN, type Action, type CardDef, type CardId, type GameState, type Installed, type NodeState, type Side } from '../engine/types';
 import { botStep } from '../bots/driver';
@@ -301,6 +301,7 @@ function Scoreboard({ v, me, who }: { v: GameState; me: Side; who: Side | null }
           <span title="cards in hand">✋ {p.hand.length}</span>
           <span title="deck">📚 {p.deck.length}</span>
           {side === 'ghost' && <span class={v.ghost.heat ? 'heat' : ''}>🔥 {v.ghost.heat}</span>}
+          {side === 'ghost' && v.ghost.core > 0 && <span title="core damage: maximum hand size is lowered by this much">🧠 −{v.ghost.core}</span>}
           {v.turn === side && v.phase !== 'gameOver' && v.phase !== 'mulligan' && <Pips n={p.cycles} of={CYCLES[side]} />}
         </div>
       </div>
@@ -323,10 +324,12 @@ function Prompt({ v, me, myMove, who }: { v: GameState; me: Side; myMove: boolea
   else if (v.phase === 'run' && v.run) {
     const ice = currentIce(v);
     const name = ice ? (isHidden(ice.card) ? 'facedown ICE' : cardOf(ice.card).name) : '';
-    if (v.run.step === 'approach') text = `The Ghost is running on ${nodeName(v.run.node)} and approaches your ${name}. Activate it?`;
+    if (v.run.step === 'approach') text = `The Ghost is running on ${nodeName(v.run.node)} and approaches your ${name}. Activate it (or an asset or upgrade)?`;
     else if (v.run.step === 'corpTrash') text = `${name} fires: choose a Ghost program to trash.`;
     else if (v.run.step === 'encounter') text = `You encounter ${name}. Boost and break with a matching breaker, or let the subroutines fire.`;
     else if (v.run.step === 'passed') text = `You are past ${name}. Continue inward, or jack out?`;
+    else if (v.run.step === 'approachNode')
+      text = me === 'corp' ? `The Ghost has reached ${nodeName(v.run.node)}. Last chance to activate assets or upgrades.` : `You reach ${nodeName(v.run.node)}. The Corp may activate cards.`;
     else if (v.run.step === 'access') text = `You access ${v.run.accessing ? cardOf(v.run.accessing).name : 'a card'}.`;
   } else {
     const n = v[me].cycles;
@@ -350,7 +353,7 @@ function Chip({ inst, v, open, hot, current }: { inst: Installed; v: GameState; 
         {known && <span class="muted small"> {v.human === 'corp' ? '(inactive)' : '(seen)'}</span>}
       </span>
       <span class="small muted">
-        {!hidden && d.type === 'ice' && `${d.subtype} · str ${d.strength} · ${d.cost}¢`}
+        {!hidden && d.type === 'ice' && `${d.subtype} · str ${iceStrength(v, inst.card)} · ${d.cost}¢`}
         {inst.dev > 0 && <b class="dev"> ●{inst.dev}</b>}
       </span>
     </button>
@@ -386,6 +389,14 @@ function NodeCol(props: { v: GameState; node: NodeState; open: (c: CardId) => vo
         {!node.ice.length && <span class="muted small noice">no ICE</span>}
       </div>
       {!central && <div class="root">{node.root ? <Chip inst={node.root} v={v} open={props.open} hot={props.hot(node.root.card)} current={running && v.run!.step === 'access'} /> : <span class="muted small">empty</span>}</div>}
+      {node.upgrades.length > 0 && (
+        <div class="upgrades">
+          <span class="muted small">upgrades</span>
+          {node.upgrades.map((u) => (
+            <Chip key={u.card} inst={u} v={v} open={props.open} hot={props.hot(u.card)} current={running && v.run!.accessing === u.card} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -400,7 +411,7 @@ function RunPanel({ v, open }: { v: GameState; open: (c: CardId) => void }) {
     <section class="panel runpanel" aria-label="Run in progress">
       <header class="row">
         <b>🏃 Run on {nodeName(run.node)}</b>
-        <span class="muted small">{run.noActivate ? 'Blackout: ICE cannot be activated' : run.heist ? 'Payroll Heist' : run.step}</span>
+        <span class="muted small">{run.noActivate ? 'Blackout: ICE cannot be activated' : run.instead ? (run.source ?? 'special run') : run.step}</span>
       </header>
       {d && (
         <div class="encounter">
@@ -408,7 +419,8 @@ function RunPanel({ v, open }: { v: GameState; open: (c: CardId) => void }) {
             {icon(d)} <b>{d.name}</b>
           </button>{' '}
           <span class="muted">
-            {d.subtype} · strength {d.strength}
+            {d.subtype} · strength {iceStrength(v, ice!.card)}
+            {iceStrength(v, ice!.card) !== d.strength && ` (printed ${d.strength})`}
           </span>
           <ol class="subs">
             {d.subs!.map((s, i) => (

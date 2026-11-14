@@ -2,9 +2,9 @@
 import { describe, expect, it } from 'vitest';
 import { CARDS } from '../src/engine/cards';
 import { legalActions } from '../src/engine/legal';
-import { actor, maxHand, nodeOf, points, ramLimit } from '../src/engine/state';
+import { actor, iceStrength, maxHand, nodeOf, points, ramLimit } from '../src/engine/state';
 import { viewFor } from '../src/engine/view';
-import { act, blank, corpTurn, ghostTurn, hand, ice, rejects, rig, site, take } from './helpers';
+import { act, actRaw, blank, corpTurn, ghostTurn, hand, ice, rejects, rig, site, take, upgrade } from './helpers';
 
 const tested = new Set<string>();
 function card(id: string, name: string, fn: () => void) {
@@ -337,6 +337,11 @@ describe('other programs, gear and contacts', () => {
     expect(s.ghost.credits).toBe(2);
     s = act(s, { type: 'run', node: 'command' });
     expect(s.ghost.credits).toBe(2);
+    // each installed copy pays
+    let t = ghostTurn(blank(), 0);
+    rig(t, 'packet-skimmer', 'packet-skimmer');
+    t = act(t, { type: 'run', node: 'command' });
+    expect(t.ghost.credits).toBe(4);
   });
   card('deep-probe', 'one more Mainframe card per Probe, top first; not for other nodes', () => {
     let s = ghostTurn(blank());
@@ -359,7 +364,7 @@ describe('other programs, gear and contacts', () => {
     expect(ramLimit(s)).toBe(6);
     expect(s.ghost.credits).toBe(7);
   });
-  card('padded-rig', '+1 hand size and prevents the first 1 damage each turn', () => {
+  card('padded-rig', '+1 hand size and prevents the first 1 net damage each turn', () => {
     let s = ghostTurn(blank());
     rig(s, 'padded-rig');
     expect(maxHand(s, 'ghost')).toBe(6);
@@ -375,10 +380,12 @@ describe('other programs, gear and contacts', () => {
     // it resets on the Corp's turn too
     s = act(s, { type: 'jackOut' });
     s = corpTurn(s);
-    s.flags.prevented = 0;
+    s.flags.prevented = { net: 0, meat: 0, core: 0 };
+    hand(s, 'ghost', 'sledge', 'sledge');
     s.ghost.heat = 1;
     const [burn] = hand(s, 'corp', 'burn-notice');
-    expect(act(s, { type: 'play', card: burn }).ghost.hand).toHaveLength(0); // 2 damage, 1 prevented
+    // Burn Notice is meat damage: Padded Rig does not stop it
+    expect(act(s, { type: 'play', card: burn }).ghost.hand).toHaveLength(1);
   });
   card('burner-phone', 'trash on your turn, no cycle: remove up to 2 heat', () => {
     let s = ghostTurn(blank());
@@ -498,6 +505,102 @@ describe('stunts', () => {
     s = act(s, { type: 'play', card: c, target: key });
     expect(s.ghost.hand).toEqual([key]);
     expect(s.ghost.discard).toEqual([stunt, c]);
+  });
+});
+
+describe('damage kinds, upgrades and activating during runs', () => {
+  card('synapse-spike', 'hunter 5/4: 1 core damage (-1 max hand size for good), then the run ends', () => {
+    const s = hit('synapse-spike');
+    expect(s.ghost.hand).toHaveLength(3);
+    expect(s.ghost.core).toBe(1);
+    expect(maxHand(s, 'ghost')).toBe(4);
+    expect(s.run).toBeNull();
+  });
+  card('flak-vest', 'prevents the first 2 meat damage each turn, not net damage', () => {
+    let s = corpTurn(blank());
+    rig(s, 'flak-vest');
+    hand(s, 'ghost', 'crowbar', 'crowbar', 'crowbar');
+    s.ghost.heat = 2;
+    const [a, b] = hand(s, 'corp', 'burn-notice', 'burn-notice');
+    s = act(s, { type: 'play', card: a }); // 3 meat, 2 prevented
+    expect(s.ghost.hand).toHaveLength(2);
+    s = act(s, { type: 'play', card: b }); // 3 meat, none left to prevent: flatlined
+    expect(s.winner).toBe('corp');
+    // net damage goes straight through
+    const t = hit('watchdog', (x) => rig(x, 'flak-vest'));
+    expect(t.ghost.hand).toHaveLength(3);
+  });
+  card('watch-desk', 'activated during a run: the Ghost gains 1 heat; activated on the Corp turn: nothing', () => {
+    let s = ghostTurn(blank());
+    const { id, card: desk } = site(s, 'watch-desk');
+    s = act(s, { type: 'run', node: 'mainframe' });
+    expect(s.run!.step).toBe('approachNode');
+    expect(legalActions(s)).toEqual([{ type: 'activate', card: desk }, { type: 'decline' }]);
+    s = actRaw(s, { type: 'activate', card: desk });
+    expect(s.ghost.heat).toBe(1);
+    expect(s.corp.credits).toBe(4);
+    expect(s.run!.step).toBe('approachNode'); // the Corp may activate more, then passes
+    s = actRaw(s, { type: 'decline' });
+    expect(s.run!.step).toBe('access');
+    let t = corpTurn(blank());
+    const { card: d2 } = site(t, 'watch-desk');
+    t = act(t, { type: 'activate', card: d2 });
+    expect(t.ghost.heat).toBe(0);
+    expect(nodeOf(t, id).root).toBeTruthy();
+  });
+  card('choke-point', 'upgrade: while active, ICE protecting its node has +2 strength', () => {
+    let s = ghostTurn(blank(), 10);
+    const [key] = rig(s, 'skeleton-key');
+    const gate = ice(s, 'command', 'riddlegate');
+    const up = upgrade(s, 'command', 'choke-point', true);
+    s = act(s, { type: 'run', node: 'command' });
+    expect(iceStrength(s, gate)).toBe(4);
+    // strength 2 key against strength 4: two boosts before it can break
+    expect(legalActions(s).some((a) => a.type === 'break')).toBe(false);
+    s = act(s, { type: 'boost', card: key });
+    s = act(s, { type: 'boost', card: key });
+    expect(legalActions(s).some((a) => a.type === 'break')).toBe(true);
+    // inactive, it does nothing
+    let t = ghostTurn(blank());
+    const g2 = ice(t, 'command', 'riddlegate');
+    upgrade(t, 'command', 'choke-point', false);
+    expect(iceStrength(t, g2)).toBe(2);
+    // it can be activated mid-run, while the Corp has a window
+    t.corp.credits = 4;
+    const g3 = ice(t, 'mainframe', 'tripwire', false);
+    const cp = nodeOf(s, 'command').upgrades[0].card;
+    expect(cp).toBe(up);
+    const cp2 = upgrade(t, 'mainframe', 'choke-point', false);
+    t = act(t, { type: 'run', node: 'mainframe' });
+    expect(t.run!.step).toBe('approach');
+    expect(legalActions(t)).toContainEqual({ type: 'activate', card: cp2 });
+    t = act(t, { type: 'activate', card: cp2 });
+    expect(t.run!.step).toBe('approach');
+    t = act(t, { type: 'activate', card: g3 });
+    expect(t.run!.step).toBe('encounter');
+    expect(iceStrength(t, g3)).toBe(3);
+  });
+  card('lockout-relay', 'upgrade: when a run gets past all ICE here, the Ghost pays 3 or the run ends', () => {
+    let s = ghostTurn(blank(), 5);
+    const relay = upgrade(s, 'mainframe', 'lockout-relay', true);
+    s = act(s, { type: 'run', node: 'mainframe' }); // nothing to activate: the window passes
+    expect(s.ghost.credits).toBe(2);
+    expect(s.run!.step).toBe('access');
+    // too poor: the run ends before any access
+    let t = ghostTurn(blank(), 2);
+    upgrade(t, 'mainframe', 'lockout-relay', true);
+    t = act(t, { type: 'run', node: 'mainframe' });
+    expect(t.run).toBeNull();
+    expect(t.flags.successfulRun).toBe(false);
+    expect(t.ghost.credits).toBe(2);
+    // activated in the window: it works on this very run
+    let u = ghostTurn(blank(), 5);
+    const r2 = upgrade(u, 'command', 'lockout-relay', false);
+    u = act(u, { type: 'run', node: 'command' });
+    u = actRaw(u, { type: 'activate', card: r2 });
+    u = actRaw(u, { type: 'decline' });
+    expect(u.ghost.credits).toBe(2);
+    expect(relay).toBeTruthy();
   });
 });
 

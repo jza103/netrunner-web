@@ -5,6 +5,8 @@ import type { CardId, GameState, Installed, Side } from './types';
 export function viewFor(state: GameState, side: Side): GameState {
   const v = structuredClone(state);
   v.rngState = 0;
+  // the other side's deck list is private; card definitions stay so revealed cards can be shown
+  v.setup.decks = { ...v.setup.decks, [side === 'corp' ? 'ghost' : 'corp']: {} };
   const hide = (list: CardId[], tag: string) => list.map((_, i) => `?${tag}${i}`);
   v.corp.deck = hide(v.corp.deck, 'deck');
   v.ghost.deck = hide(v.ghost.deck, 'gdeck');
@@ -17,6 +19,7 @@ export function viewFor(state: GameState, side: Side): GameState {
     for (const n of v.corp.nodes) {
       if (n.root) mask(n.root, `${n.id}root`);
       n.ice.forEach((i, k) => mask(i, `${n.id}ice${k}`));
+      n.upgrades.forEach((i, k) => mask(i, `${n.id}up${k}`));
     }
     // the card being accessed is shown to the Ghost; the rest of the queue is not
     if (v.run) v.run.accessQueue = hide(v.run.accessQueue, 'queue');

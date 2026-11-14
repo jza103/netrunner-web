@@ -1,13 +1,17 @@
 // The single source of truth for what may be done. apply() accepts exactly these actions.
-import { cardOf, is } from './cards';
-import { actor, breakerStrength, canBreak, canDevelop, currentIce, isSite, ramLimit, ramUsed } from './state';
-import { MAX_ICE, MAX_SITES, type Action, type CardId, type GameState, type NodeId } from './types';
+import { cardOf, ensureCards, targetedEffect } from './cards';
+import { actor, breakerStrength, canBreak, canDevelop, currentIce, iceStrength, isSite, ramLimit, ramUsed } from './state';
+import { MAX_ICE, MAX_SITES, type Action, type CardDef, type CardId, type GameState, type NodeId, type PlayCondition } from './types';
 
-/** Whether a Corp directive's play condition holds (cost aside). */
-export function directiveReady(s: GameState, card: CardId): boolean {
-  if (is(card, 'burn-notice') || is(card, 'asset-freeze')) return s.ghost.heat > 0;
-  if (is(card, 'lockdown-audit')) return s.ghostSuccessLastTurn;
+export function conditionHolds(s: GameState, c: PlayCondition | undefined): boolean {
+  if (c === 'ghostHasHeat') return s.ghost.heat > 0;
+  if (c === 'ghostRanLastTurn') return s.ghostSuccessLastTurn;
   return true;
+}
+
+/** Whether a directive or stunt's play condition holds (cost aside). */
+export function directiveReady(s: GameState, card: CardId): boolean {
+  return conditionHolds(s, cardOf(card).playIf);
 }
 
 function sites(s: GameState) {
@@ -16,13 +20,47 @@ function sites(s: GameState) {
 
 function canOpenSite(s: GameState): boolean {
   const all = sites(s);
-  return all.length < MAX_SITES && !all.some((n) => !n.root && n.ice.length === 0);
+  return all.length < MAX_SITES && !all.some((n) => !n.root && n.ice.length === 0 && n.upgrades.length === 0);
 }
 
 function developTargets(s: GameState): CardId[] {
   return sites(s)
     .filter((n) => n.root && canDevelop(n.root.card))
     .map((n) => n.root!.card);
+}
+
+/** Inactive assets and upgrades the Corp could activate now (not traps). */
+export function activatable(s: GameState): CardId[] {
+  const out: CardId[] = [];
+  for (const n of s.corp.nodes)
+    for (const inst of [...(n.root ? [n.root] : []), ...n.upgrades]) {
+      const d = cardOf(inst.card);
+      if ((d.type === 'asset' || d.type === 'upgrade') && !d.trap && !inst.active && s.corp.credits >= (d.cost ?? 0)) out.push(inst.card);
+    }
+  return out;
+}
+
+/** Play actions for a directive or stunt, one per possible target. */
+function playOptions(s: GameState, card: CardId, d: CardDef): Action[] {
+  const t = targetedEffect(d);
+  if (!t) {
+    const run = d.onPlay?.find((e) => e.op === 'run');
+    return [run && run.op === 'run' ? { type: 'play', card, node: run.node as NodeId } : { type: 'play', card }];
+  }
+  switch (t.op) {
+    case 'develop':
+      return developTargets(s).map((target) => ({ type: 'play', card, target }));
+    case 'run':
+      return runTargets(s).map((node) => ({ type: 'play', card, node }));
+    case 'reveal':
+      return s.corp.nodes
+        .filter((n) => [...n.ice, ...n.upgrades, ...(n.root ? [n.root] : [])].some((i) => !i.active))
+        .map((n) => ({ type: 'play', card, node: n.id }));
+    case 'recover':
+      return s.ghost.discard.filter((x) => t.types.includes(cardOf(x).type)).map((target) => ({ type: 'play', card, target }));
+    default:
+      return [];
+  }
 }
 
 function corpTurn(s: GameState): Action[] {
@@ -32,8 +70,8 @@ function corpTurn(s: GameState): Action[] {
     if (!n.root) continue;
     const d = cardOf(n.root.card);
     if (d.type === 'project' && n.root.dev >= (d.dev ?? 99)) out.push({ type: 'score', card: n.root.card });
-    if (d.type === 'asset' && !d.trap && !n.root.active && c.credits >= (d.cost ?? 0)) out.push({ type: 'activate', card: n.root.card });
   }
+  for (const card of activatable(s)) out.push({ type: 'activate', card });
   if (c.cycles <= 0) {
     out.push({ type: 'endTurn' });
     return out;
@@ -48,10 +86,10 @@ function corpTurn(s: GameState): Action[] {
     } else if (d.type === 'project' || d.type === 'asset') {
       for (const n of sites(s)) out.push({ type: 'install', card, node: n.id });
       if (canOpenSite(s)) out.push({ type: 'install', card, node: 'new' });
-    } else if (d.type === 'directive' && c.credits >= (d.cost ?? 0) && directiveReady(s, card)) {
-      if (is(card, 'rapid-prototyping')) for (const target of developTargets(s)) out.push({ type: 'play', card, target });
-      else out.push({ type: 'play', card });
-    }
+    } else if (d.type === 'upgrade') {
+      for (const n of c.nodes) out.push({ type: 'install', card, node: n.id });
+      if (canOpenSite(s)) out.push({ type: 'install', card, node: 'new' });
+    } else if (d.type === 'directive' && c.credits >= (d.cost ?? 0) && directiveReady(s, card)) out.push(...playOptions(s, card, d));
   }
   if (c.credits >= 1) for (const card of developTargets(s)) out.push({ type: 'develop', card });
   if (s.ghost.heat > 0 && c.credits >= 2) for (const card of s.ghost.contacts) out.push({ type: 'trashContact', card });
@@ -60,13 +98,23 @@ function corpTurn(s: GameState): Action[] {
 
 /** Nodes worth running: the three central nodes and any site with something there. */
 export function runTargets(s: GameState): NodeId[] {
-  return s.corp.nodes.filter((n) => !isSite(n.id) || n.root || n.ice.length).map((n) => n.id);
+  return s.corp.nodes.filter((n) => !isSite(n.id) || n.root || n.ice.length || n.upgrades.length).map((n) => n.id);
+}
+
+function abilityReady(s: GameState, card: CardId): boolean {
+  const a = cardOf(card).ability;
+  if (!a) return false;
+  if (a.cycles > s.ghost.cycles || (a.credits ?? 0) > s.ghost.credits || !conditionHolds(s, a.if)) return false;
+  // an ability that only draws needs cards to draw
+  if (a.effects.every((e) => e.op === 'draw') && !s.ghost.deck.length) return false;
+  return true;
 }
 
 function ghostTurn(s: GameState): Action[] {
   const g = s.ghost;
   const out: Action[] = [];
-  if (g.heat > 0) for (const card of g.gear) if (is(card, 'burner-phone')) out.push({ type: 'use', card });
+  const rig = [...g.programs, ...g.gear, ...g.contacts];
+  for (const card of rig) if (cardOf(card).ability?.cycles === 0 && abilityReady(s, card)) out.push({ type: 'use', card });
   for (const card of g.programs) out.push({ type: 'scrap', card });
   if (g.cycles <= 0) {
     out.push({ type: 'endTurn' });
@@ -80,20 +128,11 @@ function ghostTurn(s: GameState): Action[] {
     if (d.type === 'program') {
       if (ramUsed(s) + (d.ram ?? 1) <= ramLimit(s)) out.push({ type: 'install', card });
     } else if (d.type === 'gear' || d.type === 'contact') out.push({ type: 'install', card });
-    else if (d.type === 'stunt') {
-      if (is(card, 'payroll-heist')) out.push({ type: 'play', card, node: 'command' });
-      else if (is(card, 'deep-dive')) out.push({ type: 'play', card, node: 'mainframe' });
-      else if (is(card, 'blackout')) for (const node of runTargets(s)) out.push({ type: 'play', card, node });
-      else if (is(card, 'recon-sweep')) {
-        for (const n of s.corp.nodes) if ((n.root && !n.root.active) || n.ice.some((i) => !i.active)) out.push({ type: 'play', card, node: n.id });
-      } else if (is(card, 'salvage')) {
-        for (const target of g.discard) if (['program', 'gear'].includes(cardOf(target).type)) out.push({ type: 'play', card, target });
-      } else out.push({ type: 'play', card });
-    }
+    else if (d.type === 'stunt' && directiveReady(s, card)) out.push(...playOptions(s, card, d));
   }
   for (const node of runTargets(s)) out.push({ type: 'run', node });
   if (g.heat > 0 && g.credits >= 2) out.push({ type: 'shedHeat' });
-  for (const card of g.contacts) if (is(card, 'safehouse') && g.deck.length) out.push({ type: 'use', card });
+  for (const card of rig) if ((cardOf(card).ability?.cycles ?? 0) > 0 && abilityReady(s, card)) out.push({ type: 'use', card });
   return out;
 }
 
@@ -101,8 +140,13 @@ function runActions(s: GameState): Action[] {
   const run = s.run!;
   const g = s.ghost;
   switch (run.step) {
-    case 'approach':
-      return [{ type: 'activate', card: currentIce(s)!.card }, { type: 'decline' }];
+    case 'approach': {
+      // the ICE itself (the Corp can afford it, or there would be no window), then other cards
+      const ice = currentIce(s)!.card;
+      return [{ type: 'activate', card: ice }, ...activatable(s).map((card): Action => ({ type: 'activate', card })), { type: 'decline' }];
+    }
+    case 'approachNode':
+      return [...activatable(s).map((card): Action => ({ type: 'activate', card })), { type: 'decline' }];
     case 'encounter': {
       const ice = currentIce(s)!;
       const def = cardOf(ice.card);
@@ -110,7 +154,7 @@ function runActions(s: GameState): Action[] {
       for (const card of g.programs) {
         if (!canBreak(card, ice.card)) continue;
         const b = cardOf(card).breaker!;
-        if (breakerStrength(s, card) < (def.strength ?? 0)) {
+        if (breakerStrength(s, card) < iceStrength(s, ice.card)) {
           if (g.credits >= b.boostCost) out.push({ type: 'boost', card });
         } else if (g.credits >= b.breakCost) {
           def.subs!.forEach((_, sub) => {
@@ -141,6 +185,7 @@ function runActions(s: GameState): Action[] {
 }
 
 export function legalActions(s: GameState): Action[] {
+  ensureCards(s);
   const who = actor(s);
   if (!who) return [];
   if (s.phase === 'mulligan') return [{ type: 'keep' }, { type: 'mulligan' }];

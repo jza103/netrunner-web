@@ -5,16 +5,47 @@ export type CardId = string; // "<defId>#<n>", or "?…" for a card hidden from 
 export type NodeId = string; // 'command' | 'mainframe' | 'dump' | 'site<n>'
 
 export type IceType = 'wall' | 'cipher' | 'hunter';
-export type CardType = 'project' | 'ice' | 'asset' | 'directive' | 'program' | 'gear' | 'contact' | 'stunt' | 'hidden';
+export type CardType = 'project' | 'ice' | 'asset' | 'upgrade' | 'directive' | 'program' | 'gear' | 'contact' | 'stunt' | 'hidden';
+export type DamageKind = 'net' | 'meat' | 'core';
+export const DAMAGE_KINDS: DamageKind[] = ['net', 'meat', 'core'];
 
-export type SubOp =
-  | { op: 'endRun' }
-  | { op: 'damage'; n: number }
-  | { op: 'loseCredits'; n: number }
-  | { op: 'corpGain'; n: number }
+/**
+ * One step of a card effect. Every card's behaviour is data built from these, for the built-in
+ * set and for custom card packs alike. `who` defaults to the side that owns the card.
+ */
+export type Effect =
+  | { op: 'gain'; n: number; who?: Side }
+  | { op: 'draw'; n: number; who?: Side }
+  /** damage to the Ghost: n, plus perHeat for each heat the Ghost has, plus perDev for each counter on this card */
+  | { op: 'damage'; kind: DamageKind; n: number; perHeat?: number; perDev?: number }
   | { op: 'heat'; n: number }
+  | { op: 'shedHeat'; n: number }
+  /** the Ghost loses n credits (plus perHeat each), as many as they have */
+  | { op: 'loseCredits'; n: number; perHeat?: number }
+  /** the Corp loses up to n credits and the Ghost gains that many */
+  | { op: 'drain'; n: number }
   | { op: 'loseCycle'; n: number }
-  | { op: 'trashProgram' };
+  /** during a run: the Corp trashes 1 installed program of its choice */
+  | { op: 'trashProgram' }
+  /** during a run: end the run */
+  | { op: 'endRun' }
+  /** during a run: the Ghost loses n credits; if they have fewer, the run ends instead */
+  | { op: 'payOrEndRun'; n: number }
+  /** targets an installed Corp card that can be developed */
+  | { op: 'develop'; n: number }
+  /** shuffle the Dump into the Mainframe */
+  | { op: 'recycleDump' }
+  /** the Ghost makes a run; `instead` replaces accessing cards when it succeeds */
+  | { op: 'run'; node: 'command' | 'mainframe' | 'dump' | 'any'; extraAccess?: number; noActivate?: boolean; instead?: Effect[] }
+  /** targets a node: the Ghost looks at every facedown card in or protecting it */
+  | { op: 'reveal' }
+  /** targets a card of one of these types in the Scrapheap: return it to hand */
+  | { op: 'recover'; types: CardType[] };
+
+/** ICE subroutines are effects. */
+export type SubOp = Effect;
+
+export type PlayCondition = 'ghostHasHeat' | 'ghostRanLastTurn';
 
 export interface Breaker {
   breaks: IceType | 'any';
@@ -22,6 +53,16 @@ export interface Breaker {
   boostCost: number;
   boostBy: number;
   breakCost: number;
+}
+
+/** An ability on an installed Ghost card, used with the 'use' action. */
+export interface Ability {
+  /** cycles spent: 0 or 1 */
+  cycles: number;
+  credits?: number;
+  trashSelf?: boolean;
+  if?: PlayCondition;
+  effects: Effect[];
 }
 
 export interface CardDef {
@@ -36,17 +77,58 @@ export interface CardDef {
   dev?: number;
   points?: number;
   stealCost?: number;
+  onScore?: Effect[];
   // ice
   subtype?: IceType;
   strength?: number;
   subs?: SubOp[];
-  // asset
+  // asset and upgrade
   trash?: number;
   developable?: boolean;
+  /** a trap fires its onAccess effects when accessed while installed */
   trap?: boolean;
+  onAccess?: Effect[];
+  /** effects when the Corp activates this during a run */
+  onActivateInRun?: Effect[];
+  /** upgrade, while active: ICE protecting this node gets this much extra strength */
+  iceStrength?: number;
+  /** upgrade, while active: effects when a run on this node passes all its ICE */
+  onApproachNode?: Effect[];
+  // directive and stunt
+  playIf?: PlayCondition;
+  onPlay?: Effect[];
+  /** removed from the game after it is played */
+  removeAfterPlay?: boolean;
+  // installed cards: active Corp assets and upgrades, installed Ghost cards
+  onTurnStart?: Effect[];
+  // Ghost installed cards
+  onFirstSuccessfulRun?: Effect[];
+  ability?: Ability;
+  ramBonus?: number;
+  handBonus?: number;
+  /** each turn, prevent the first n damage of each listed kind */
+  prevent?: Partial<Record<DamageKind, number>>;
+  /** extra cards accessed from the Mainframe */
+  mainframeAccess?: number;
   // program
   ram?: number;
   breaker?: Breaker;
+}
+
+/** A set of custom cards, loaded from JSON. See reference/CARD_PACKS.md. */
+export interface CardPack {
+  name: string;
+  cards: CardDef[];
+  /** deck lists by card id (pack or built-in) and copies; a side left out uses the built-in deck plus this pack's cards for that side */
+  decks?: Partial<Record<Side, Record<string, number>>>;
+}
+
+/** Which cards this game uses. Saved with the game so it replays and resumes exactly. */
+export interface GameSetup {
+  packName: string | null;
+  /** custom card definitions, with ids already namespaced */
+  cards: CardDef[];
+  decks: Record<Side, Record<string, number>>;
 }
 
 /** A Corp card on the table. */
@@ -62,6 +144,8 @@ export interface NodeState {
   ice: Installed[];
   /** sites only: the one project or asset installed here */
   root: Installed | null;
+  /** upgrades installed in this node (any node) */
+  upgrades: Installed[];
 }
 
 export interface CorpState {
@@ -92,11 +176,13 @@ export interface GhostState {
   gear: CardId[];
   contacts: CardId[];
   heat: number;
+  /** core damage taken: each point is -1 maximum hand size, for the rest of the game */
+  core: number;
   /** facedown Corp cards the Ghost has looked at */
   known: CardId[];
 }
 
-export type RunStep = 'approach' | 'encounter' | 'passed' | 'corpTrash' | 'access';
+export type RunStep = 'approach' | 'encounter' | 'passed' | 'corpTrash' | 'approachNode' | 'access';
 
 export interface RunState {
   node: NodeId;
@@ -112,7 +198,9 @@ export interface RunState {
   accessing: CardId | null;
   noActivate: boolean;
   extraAccess: number;
-  heist: boolean;
+  /** effects that replace accessing cards, and the card they come from */
+  instead: Effect[] | null;
+  source: string | null;
 }
 
 export type Phase = 'mulligan' | 'action' | 'discard' | 'run' | 'gameOver';
@@ -132,6 +220,7 @@ export interface GameState {
   human: Side;
   /** identifies this game (from the seed); used to key saved Operator memory */
   gameId: string;
+  setup: GameSetup;
   turn: Side;
   turnNumber: number;
   phase: Phase;
@@ -141,7 +230,7 @@ export interface GameState {
   ghost: GhostState;
   run: RunState | null;
   /** this turn */
-  flags: { successfulRun: boolean; skimmed: boolean; prevented: number };
+  flags: { successfulRun: boolean; prevented: Record<DamageKind, number> };
   ghostSuccessLastTurn: boolean;
   winner: Side | null;
   winReason: string;
@@ -160,6 +249,7 @@ export type Action =
   | { type: 'score'; card: CardId }
   | { type: 'activate'; card: CardId }
   | { type: 'decline' }
+
   | { type: 'trashContact'; card: CardId }
   | { type: 'run'; node: NodeId }
   | { type: 'shedHeat' }

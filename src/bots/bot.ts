@@ -2,7 +2,7 @@
 // return one of legalActions(view), so they cannot cheat or make an illegal move.
 import { CARDS, cardOf, is, isHidden } from '../engine/cards';
 import { legalActions } from '../engine/legal';
-import { actor, breakerStrength, canBreak, count, currentIce, isSite, nodeOf, ramLimit, ramUsed } from '../engine/state';
+import { actor, breakerStrength, canBreak, currentIce, iceStrength, isSite, nodeOf, ramLimit, ramUsed, rigSum } from '../engine/state';
 import type { Action, CardDef, CardId, GameState, NodeId, NodeState, Side } from '../engine/types';
 
 type Of<T extends Action['type']> = Extract<Action, { type: T }>;
@@ -45,12 +45,13 @@ function corpTurn(v: GameState, legal: Action[]): Action {
 
   const score = pick(legal, 'score');
   if (score) return score;
-  const shell = pick(legal, 'activate');
-  if (shell) return shell;
+  // on its own turn, only switch on cards that pay over time; the rest wait for a run
+  const econ = pick(legal, 'activate', (a) => !!cardOf(a.card).onTurnStart?.length);
+  if (econ) return econ;
   if (c.cycles <= 0) return pick(legal, 'endTurn')!;
 
   // lethal or heavy Burn Notice
-  const rigs = Math.max(0, count(g.gear, 'padded-rig') - v.flags.prevented);
+  const rigs = Math.max(0, rigSum(v, (d) => d.prevent?.meat) - v.flags.prevented.meat);
   const burn = pick(legal, 'play', (a) => is(a.card, 'burn-notice'));
   if (burn && 1 + g.heat - rigs > g.hand.length) return burn;
 
@@ -134,6 +135,26 @@ function corpTurn(v: GameState, legal: Action[]): Action {
     }
   }
 
+  // upgrades: on the scoring site, else the Mainframe or Command
+  const up = c.hand.find((x) => cardOf(x).type === 'upgrade');
+  if (up && c.cycles >= 2) {
+    const target = sites.find((n) => n.root && cardOf(n.root.card).type === 'project') ?? open ?? nodeOf(v, cardOf(up).iceStrength ? 'command' : 'mainframe');
+    const crowded = target.upgrades.length >= 1;
+    const a = !crowded && pick(legal, 'install', (x) => x.card === up && x.node === target.id);
+    if (a) return a;
+  }
+  const desk = c.hand.find((x) => cardOf(x).onActivateInRun?.length && cardOf(x).type === 'asset');
+  if (desk && c.cycles >= 2) {
+    const a = pick(legal, 'install', (x) => x.card === desk && x.node === 'new');
+    if (a) return a;
+  }
+  // custom directives that only make money or draw
+  const plain = pick(legal, 'play', (a) => {
+    const fx = cardOf(a.card).onPlay ?? [];
+    return fx.length > 0 && fx.every((e) => e.op === 'gain' || e.op === 'draw') && !is(a.card, 'quarterly-windfall');
+  });
+  if (plain && c.credits >= (cardOf(plain.card).cost ?? 0) + 2) return plain;
+
   const hunt = pick(legal, 'trashContact');
   if (hunt && c.credits >= 6) return hunt;
   const recall = pick(legal, 'play', (a) => is(a.card, 'recall'));
@@ -152,8 +173,23 @@ function corpRun(v: GameState, legal: Action[]): Action {
     const best = [...v.ghost.programs].sort((a, b) => Number(!!cardOf(b).breaker) - Number(!!cardOf(a).breaker) || (cardOf(b).cost ?? 0) - (cardOf(a).cost ?? 0))[0];
     return pick(legal, 'chooseTrash', (a) => a.card === best)!;
   }
-  // approach: switch the ICE on unless letting the Ghost in is better
   const node = nodeOf(v, run.node);
+  const valuable = !isSite(node.id) || (!!node.root && cardOf(node.root.card).type === 'project');
+  if (run.step === 'approachNode' || run.step === 'approach') {
+    // punish the run, or lock the node, with cards that work mid-run
+    const iceCost = run.step === 'approach' ? (cardOf(currentIce(v)!.card).cost ?? 0) : 0;
+    for (const a of legal) {
+      if (a.type !== 'activate' || (run.step === 'approach' && a.card === currentIce(v)?.card)) continue;
+      const d = cardOf(a.card);
+      const spare = v.corp.credits - (d.cost ?? 0) >= iceCost;
+      const here = node.upgrades.some((u) => u.card === a.card);
+      if (d.onActivateInRun?.length && spare) return a;
+      if (here && valuable && spare && d.iceStrength && run.step === 'approach') return a;
+      if (here && valuable && spare && d.onApproachNode?.length && run.step === 'approachNode') return a;
+    }
+    if (run.step === 'approachNode') return pick(legal, 'decline')!;
+  }
+  // approach: switch the ICE on unless letting the Ghost in is better
   const trapInside = node.root && cardOf(node.root.card).trap;
   const nothingInside = isSite(node.id) && !node.root;
   if (trapInside || nothingInside) return pick(legal, 'decline')!;
@@ -180,7 +216,7 @@ function breakPlan(v: GameState, ice: CardId, n: number): { card: CardId; cost: 
   for (const card of v.ghost.programs) {
     if (!canBreak(card, ice)) continue;
     const b = cardOf(card).breaker!;
-    const need = Math.max(0, (cardOf(ice).strength ?? 0) - breakerStrength(v, card));
+    const need = Math.max(0, iceStrength(v, ice) - breakerStrength(v, card));
     const cost = Math.ceil(need / b.boostBy) * b.boostCost + n * b.breakCost;
     if (!best || cost < best.cost) best = { card, cost };
   }
@@ -189,7 +225,7 @@ function breakPlan(v: GameState, ice: CardId, n: number): { card: CardId; cost: 
 
 /** Worst damage a facedown ICE could do, given what the Corp can afford to switch on. */
 function faceCheckDamage(v: GameState): number {
-  return Math.max(0, ...CARDS.filter((d) => d.type === 'ice' && (d.cost ?? 0) <= v.corp.credits).map(totalDamage));
+  return Math.max(0, ...[...CARDS, ...v.setup.cards].filter((d) => d.type === 'ice' && d.side === 'corp' && (d.cost ?? 0) <= v.corp.credits).map(totalDamage));
 }
 
 interface Path {
@@ -217,6 +253,11 @@ function pathCost(v: GameState, nodeId: NodeId, fromPos: number, noActivate = fa
     else if (d.subs!.some((s) => s.op === 'endRun')) p.blocked = true;
     else p.damage += totalDamage(d);
   }
+  // active upgrades that charge a toll at the node
+  for (const u of node.upgrades) {
+    if (!u.active) continue;
+    for (const e of cardOf(u.card).onApproachNode ?? []) if (e.op === 'payOrEndRun') p.cost += e.n;
+  }
   return p;
 }
 
@@ -235,7 +276,7 @@ function runsThisTurn(v: GameState, name: string): number {
 
 function nodeValue(v: GameState, n: NodeState): number {
   const g = v.ghost;
-  if (n.id === 'mainframe') return runsThisTurn(v, 'Mainframe') ? 0 : 5 + 2 * count(g.programs, 'deep-probe');
+  if (n.id === 'mainframe') return runsThisTurn(v, 'Mainframe') ? 0 : 5 + 2 * rigSum(v, (d) => d.mainframeAccess);
   if (n.id === 'command') return runsThisTurn(v, 'Command') >= 2 || !v.corp.hand.length ? 0 : 4 + (v.corp.hand.length >= 4 ? 1 : 0);
   if (n.id === 'dump') {
     const unseen = v.corp.discard.filter(isHidden).length;
@@ -332,6 +373,7 @@ function ghostTurn(v: GameState, legal: Action[]): Action {
   if (recon) return recon;
 
   if (install('padded-rig')) return install('padded-rig')!;
+  if (install('flak-vest') && (g.heat > 0 || v.turnNumber > 6)) return install('flak-vest')!;
   const freeRam = ramLimit(v) - ramUsed(v);
   const allCovered = covers('wall') && covers('cipher') && covers('hunter');
   if (freeRam >= 2 || allCovered) {
@@ -349,6 +391,12 @@ function ghostTurn(v: GameState, legal: Action[]): Action {
   if (safehouse && g.hand.length <= 2) return safehouse;
 
   if (run && run.score > 0) return go(run);
+
+  const plain = pick(legal, 'play', (a) => {
+    const fx = cardOf(a.card).onPlay ?? [];
+    return fx.length > 0 && fx.every((e) => e.op === 'gain' || e.op === 'draw');
+  });
+  if (plain && g.credits >= (cardOf(plain.card).cost ?? 0)) return plain;
 
   const draw = pick(legal, 'draw');
   if (g.credits < 4) return pick(legal, 'credit')!;
@@ -399,7 +447,7 @@ function ghostRun(v: GameState, legal: Action[]): Action {
   if (run.step === 'passed') {
     const p = pathCost(v, run.node, run.pos - 1, run.noActivate);
     const risk = p.damage + (p.unknown ? faceCheckDamage(v) : 0);
-    const trap = run.heist ? 0 : trapRisk(v, node);
+    const trap = run.instead ? 0 : trapRisk(v, node);
     if (p.blocked || p.cost > g.credits || g.hand.length < risk || g.hand.length - risk < trap) return pick(legal, 'jackOut')!;
     return pick(legal, 'continue')!;
   }

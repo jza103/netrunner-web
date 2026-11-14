@@ -75,7 +75,7 @@ Debugging: `npx vite-node scripts/debug-seed.ts SEED` prints a full bot-vs-bot g
 Where the rules or a card could be read two ways, this is what the engine does.
 
 1. **Every cycle must be spent.** You cannot end the turn early; taking a credit is always available.
-2. **Activation timing.** The Corp activates ICE only when the Ghost approaches it during a run, and assets only on its own turn. There is no other window.
+2. **Activation timing.** The Corp activates ICE only when the Ghost approaches it during a run. It activates assets and upgrades (not traps) on its own turn (no cycle), or during a run: in the window when the Ghost approaches a piece of ICE it could activate, and in the window when the run gets past all ICE and reaches the node. The node window always happens, even when the Corp has nothing it could activate, so its existence gives nothing away.
 3. **Unaffordable ICE.** If the Corp cannot pay for inactive ICE (or Blackout is in effect) the Ghost passes it with no prompt to either side and no jack-out point.
 4. **Jack-out points.** The Ghost may jack out only right after getting past ICE it encountered, including the last one before access.
 5. **Boosts** last for one encounter. They do not carry to the next ICE.
@@ -86,14 +86,21 @@ Where the rules or a card could be read two ways, this is what the engine does.
 10. **Trash costs.** Only cards with a trash cost (assets) can be trashed on access, from anywhere except the Dump.
 11. **Decoy Lab** fires only when accessed while installed in a site, not from Command or the Mainframe. Its damage lands before the Ghost decides whether to trash it. It cannot be activated; it turns faceup when it fires.
 12. **Blacksite Ledger.** If the Ghost cannot or will not pay 3, the card stays exactly where it was (and, if it was facedown in a site, the Ghost now knows what it is).
-13. **Padded Rig** prevents the first 1 damage in each turn, the Ghost's and the Corp's alike. Two Rigs prevent 2 per turn.
-14. **Packet Skimmer** pays on the first successful run of the turn even when Payroll Heist replaces the access. Two Skimmers still pay once.
+13. **Padded Rig** prevents the first 1 net damage in each turn, the Ghost's and the Corp's alike. Two Rigs prevent 2 per turn. **Flak Vest** works the same way for meat damage. Prevention never applies to core damage.
+14. **Packet Skimmer** pays on the first successful run of the turn even when Payroll Heist replaces the access. Each installed copy pays (the text is on each card).
 15. **Payroll Heist** gives its heat only if the run succeeds.
 16. **Lockdown Audit** checks only the Ghost's most recent turn.
 17. **Recall** also removes the Ghost's knowledge of what was in the Dump, since those cards are shuffled away.
 18. **Installing over a card in a site** trashes the old card facedown (faceup if it was active). ICE cannot be replaced or removed, and a node holds at most 5.
 19. **Empty sites** are reused before a new site can be opened; there can be at most 6 sites.
 20. **Mulligan** is once per side, decided Corp first.
+21. **Damage kinds.** Net, meat and core damage all discard at random, and more than the Ghost's hand flatlines them. Core damage also lowers the Ghost's maximum hand size by 1 per point for the rest of the game. A maximum hand size below 0 at the end of the Ghost's turn flatlines them; exactly 0 means discarding everything.
+22. **Upgrades** install for 1 cycle in any node, central or site, alongside whatever is there; a node may hold any number. Installing a project or asset over a site's root card does not touch its upgrades. A site holding only an upgrade can be run.
+23. **Accessing upgrades.** A successful run on a node accesses its upgrades after the normal access (Command, Mainframe, Dump or the site's root card), one at a time. They can be trashed for their trash cost.
+24. **Lockout Relay** charges when the run gets past all ICE, after the Corp's node window (so one activated in that window charges at once). It does not charge if the run never gets that far.
+25. **Choke Point** raises strength only while active. If the Corp activates it while the Ghost approaches ICE in that node, the boost applies to that ICE's encounter.
+26. **Watch Desk** gives heat only when activated during a run, not when activated on the Corp's turn.
+27. **Running out of money mid-approach.** If the Corp spends credits on another card while the Ghost approaches inactive ICE and can no longer afford that ICE, the Ghost slips past it.
 
 ## Status
 

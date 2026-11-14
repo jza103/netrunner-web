@@ -34,7 +34,7 @@ Play at least three full games as each side on a phone. Things to look at:
 ### 4. Hardening
 - The soak test takes about 30 seconds, mostly `structuredClone` of a growing event list. If it gets in the way, cap `events` or move the log out of the cloned state.
 - Done: `tests/fuzz.test.ts` plays 60 games of uniformly random legal actions on both sides. It checks the invariants after every step, that `apply` never mutates its input, and that every listed action applies.
-- Saved games have no version field beyond the storage key (`breachline:save:v1`). Bump the key if `GameState` changes shape.
+- Saved games have no version field beyond the storage key (`breachline:save:v2`, bumped for upgrades, damage kinds and card packs). Bump the key if `GameState` changes shape again.
 
 ### 5. Nice to have
 - Card art placeholders and a little animation on runs.

@@ -3,7 +3,7 @@ import { CARDS, cardOf, deckList } from '../src/engine/cards';
 import { legalActions } from '../src/engine/legal';
 import { actor, newGame, nodeOf, points } from '../src/engine/state';
 import { viewFor } from '../src/engine/view';
-import { act, blank, corpTurn, ghostTurn, hand, ice, rejects, rig, site, take } from './helpers';
+import { act, actRaw, blank, corpTurn, ghostTurn, hand, ice, rejects, rig, site, take, upgrade } from './helpers';
 
 describe('card data', () => {
   it('every card has the fields its type needs', () => {
@@ -13,15 +13,15 @@ describe('card data', () => {
       if (c.type === 'project') expect(c.dev! > 0 && c.points! > 0, c.id).toBe(true);
       else expect(c.cost, c.id).toBeTypeOf('number');
       if (c.type === 'ice') expect(c.subs!.length > 0 && c.strength! > 0 && !!c.subtype, c.id).toBe(true);
-      if (c.type === 'asset') expect(c.trash, c.id).toBeTypeOf('number');
+      if (c.type === 'asset' || c.type === 'upgrade') expect(c.trash, c.id).toBeTypeOf('number');
       if (c.type === 'program') expect(c.ram, c.id).toBeTypeOf('number');
       expect(c.type === 'ice' || !!c.breaker || c.text.length > 0, `${c.id} has rules text`).toBe(true);
       expect(['corp', 'ghost']).toContain(c.side);
     }
   });
-  it('decks: 45 Corp cards with 21 project points, 40 Ghost cards', () => {
-    expect(deckList('corp')).toHaveLength(45);
-    expect(deckList('ghost')).toHaveLength(40);
+  it('decks: 52 Corp cards with 21 project points, 41 Ghost cards', () => {
+    expect(deckList('corp')).toHaveLength(52);
+    expect(deckList('ghost')).toHaveLength(41);
     expect(deckList('corp').reduce((n, c) => n + (cardOf(c).points ?? 0), 0)).toBe(21);
   });
 });
@@ -310,6 +310,7 @@ describe('runs', () => {
   it('a facedown card the Ghost accessed and left stays known to the Ghost', () => {
     let s = ghostTurn(blank(), 0);
     const { id, card } = site(s, 'shell-company');
+    s.corp.credits = 0; // so the Corp cannot activate it as the run reaches the site
     expect(viewFor(s, 'ghost').corp.nodes.at(-1)!.root!.card).toMatch(/^\?/);
     s = act(s, { type: 'run', node: id });
     expect(legalActions(s)).toEqual([{ type: 'leave' }]); // cannot afford the trash cost
@@ -385,5 +386,128 @@ describe('hidden information', () => {
     const s = blank();
     const w = ice(s, 'command', 'bulkhead', true);
     expect(viewFor(s, 'ghost').corp.nodes[0].ice[0].card).toBe(w);
+  });
+});
+
+describe('upgrades', () => {
+  it('install for 1 cycle in any node, central or site, without replacing what is there', () => {
+    let s = corpTurn(blank());
+    const [a, b, p] = hand(s, 'corp', 'choke-point', 'lockout-relay', 'skyhook-contract');
+    s = act(s, { type: 'install', card: a, node: 'command' });
+    expect(nodeOf(s, 'command').upgrades.map((u) => u.card)).toEqual([a]);
+    expect(nodeOf(s, 'command').root).toBeNull();
+    expect(s.corp.credits).toBe(10);
+    s = act(s, { type: 'install', card: p, node: 'new' });
+    s = act(s, { type: 'install', card: b, node: 'site1' });
+    expect(nodeOf(s, 'site1').root!.card).toBe(p);
+    expect(nodeOf(s, 'site1').upgrades.map((u) => u.card)).toEqual([b]);
+    // replacing the project leaves the upgrade
+    s = corpTurn(s);
+    const [q] = hand(s, 'corp', 'shell-company');
+    s = act(s, { type: 'install', card: q, node: 'site1' });
+    expect(nodeOf(s, 'site1').upgrades).toHaveLength(1);
+  });
+  it('are facedown to the Ghost until active; activated on the Corp turn for their cost', () => {
+    let s = corpTurn(blank());
+    const u = upgrade(s, 'command', 'choke-point');
+    expect(viewFor(s, 'ghost').corp.nodes[0].upgrades[0].card).toMatch(/^\?/);
+    s = act(s, { type: 'activate', card: u });
+    expect(s.corp.credits).toBe(8);
+    expect(viewFor(s, 'ghost').corp.nodes[0].upgrades[0].card).toBe(u);
+  });
+  it('are accessed with the node: after the normal access, and can be trashed for their cost', () => {
+    let s = ghostTurn(blank(), 10);
+    s.corp.credits = 0;
+    const top = take(s, 'tripwire');
+    s.corp.deck.push(top);
+    const u = upgrade(s, 'mainframe', 'lockout-relay');
+    s = act(s, { type: 'run', node: 'mainframe' });
+    expect(s.run!.accessing).toBe(top);
+    s = act(s, { type: 'leave' });
+    expect(s.run!.accessing).toBe(u);
+    expect(legalActions(s)).toEqual([{ type: 'trash' }, { type: 'leave' }]);
+    s = act(s, { type: 'trash' });
+    expect(s.ghost.credits).toBe(7);
+    expect(nodeOf(s, 'mainframe').upgrades).toEqual([]);
+    expect(s.corp.discard).toContain(u);
+  });
+  it('a site holding only an upgrade can be run', () => {
+    let s = corpTurn(blank());
+    const [a] = hand(s, 'corp', 'choke-point');
+    s = act(s, { type: 'install', card: a, node: 'new' });
+    s = ghostTurn(s);
+    expect(legalActions(s)).toContainEqual({ type: 'run', node: 'site1' });
+  });
+});
+
+describe('the Corp window when a run reaches its node', () => {
+  it('comes after all ICE is passed, even with nothing to activate, so it gives nothing away', () => {
+    let s = ghostTurn(blank());
+    s.corp.credits = 0;
+    s = actRaw(s, { type: 'run', node: 'mainframe' });
+    expect(s.run!.step).toBe('approachNode');
+    expect(actor(s)).toBe('corp');
+    expect(legalActions(s)).toEqual([{ type: 'decline' }]);
+    s = actRaw(s, { type: 'decline' });
+    expect(s.run!.step).toBe('access');
+  });
+  it('offers every inactive non-trap asset and upgrade the Corp can afford, anywhere', () => {
+    let s = ghostTurn(blank());
+    s.corp.credits = 1;
+    const { card: shell } = site(s, 'shell-company');
+    site(s, 'decoy-lab');
+    upgrade(s, 'command', 'choke-point'); // costs 2: too much
+    const relay = upgrade(s, 'dump', 'lockout-relay');
+    s = actRaw(s, { type: 'run', node: 'mainframe' });
+    expect(legalActions(s)).toEqual([{ type: 'activate', card: relay }, { type: 'activate', card: shell }, { type: 'decline' }]);
+  });
+  it('spending on another card while approaching ICE it can then not afford: the Ghost slips past', () => {
+    let s = ghostTurn(blank());
+    s.corp.credits = 3;
+    const wall = ice(s, 'mainframe', 'bulkhead', false);
+    const cp = upgrade(s, 'mainframe', 'choke-point');
+    s = actRaw(s, { type: 'run', node: 'mainframe' });
+    s = actRaw(s, { type: 'activate', card: cp });
+    expect(s.corp.credits).toBe(1);
+    expect(s.run!.step).toBe('approachNode');
+    expect(nodeOf(s, 'mainframe').ice[0]).toMatchObject({ card: wall, active: false });
+  });
+  it('Blackout stops ICE activation only; the Corp still gets its window', () => {
+    let s = ghostTurn(blank());
+    const [b] = hand(s, 'ghost', 'blackout');
+    const { card: desk } = site(s, 'watch-desk');
+    s = actRaw(s, { type: 'play', card: b, node: 'mainframe' });
+    expect(legalActions(s)).toContainEqual({ type: 'activate', card: desk });
+  });
+});
+
+describe('damage kinds', () => {
+  it('net, meat and core damage all discard at random; only core lowers hand size', () => {
+    for (const [def, core] of [['watchdog', 0], ['synapse-spike', 1]] as const) {
+      let s = ghostTurn(blank());
+      hand(s, 'ghost', 'crowbar', 'crowbar');
+      ice(s, 'command', def);
+      s = act(s, { type: 'run', node: 'command' });
+      s = act(s, { type: 'proceed' });
+      expect(s.ghost.hand).toHaveLength(1);
+      expect(s.ghost.core).toBe(core);
+    }
+  });
+  it('a maximum hand size below 0 at the end of the Ghost turn flatlines them', () => {
+    let s = ghostTurn(blank());
+    s.ghost.core = 6;
+    s.ghost.cycles = 0;
+    s = act(s, { type: 'endTurn' });
+    expect(s.winner).toBe('corp');
+    expect(s.winReason).toMatch(/flatlined/);
+    // exactly 0 is survivable: discard everything
+    let t = ghostTurn(blank());
+    t.ghost.core = 5;
+    t.ghost.cycles = 0;
+    hand(t, 'ghost', 'crowbar');
+    t = act(t, { type: 'endTurn' });
+    expect(t.phase).toBe('discard');
+    t = act(t, { type: 'discard', card: t.ghost.hand[0] });
+    expect(t.turn).toBe('corp');
   });
 });
