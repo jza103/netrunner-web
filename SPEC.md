@@ -20,8 +20,9 @@ Why: the assistant that built this does not recreate a specific existing game (i
 
 **In v1**
 
-- Full rules of Breachline (see `reference/RULES.md`): turns, cycles, credits, installing, ICE, runs with approach / encounter / break / jack out / access, damage, heat, scoring and stealing, all win conditions
-- All 40 card designs (85 cards: a 45-card Corp deck and a 40-card Ghost deck)
+- Full rules of Breachline (see `reference/RULES.md`): turns, cycles, credits, installing, ICE, upgrades, runs with approach / encounter / break / jack out / reaching the node / access, Corp activation during runs, net, meat and core damage, heat, scoring and stealing, all win conditions
+- All 45 card designs (93 cards: a 52-card Corp deck and a 41-card Ghost deck)
+- Custom card packs: Jason's own cards as JSON, checked by the engine and played by the same rules code (`reference/CARD_PACKS.md`)
 - A rule-based bot for each side
 - Save and resume in the browser
 - Phone-first layout that also works on tablet and desktop
@@ -29,7 +30,7 @@ Why: the assistant that built this does not recreate a specific existing game (i
 
 **Not in v1**
 
-- Deck building, more factions or identities
+- Deck building in the app (deck lists can be set in a card pack), more factions or identities
 - Human-vs-human play, accounts, a backend
 - Bot difficulty levels or personalities
 
@@ -63,17 +64,7 @@ Pure TypeScript in `src/engine`, no DOM, no mutation of its input, all randomnes
 
 ## Card data
 
-`data/cards.json`, one entry per design: `id`, `name`, `side`, `type`, `copies`, `text`, plus structured fields by type:
-
-| Type | Fields |
-| --- | --- |
-| project | `dev` (counters needed), `points`, `stealCost` |
-| ice | `subtype` (wall, cipher, hunter), `cost`, `strength`, `subs` (list of subroutine ops) |
-| asset | `cost`, `trash`, `developable`, `trap` |
-| directive, stunt, gear, contact | `cost` |
-| program | `cost`, `ram`, `breaker` (`breaks`, `strength`, `boostCost`, `boostBy`, `breakCost`) |
-
-Subroutine ops: `endRun`, `damage(n)`, `loseCredits(n)`, `corpGain(n)`, `heat(n)`, `loseCycle(n)`, `trashProgram`. Card abilities that are not subroutines are implemented by card id in `src/engine/actions.ts`, each with a test.
+`data/cards.json`, one entry per design: `id`, `name`, `side`, `type`, `copies`, `text`, plus structured fields by type. Every effect is a list of `Effect` ops (`src/engine/types.ts`), interpreted by `runEffect` in `src/engine/actions.ts`; no card has its own code. The fields and ops are documented for pack authors in `reference/CARD_PACKS.md`, and the built-in set uses the same format, so it doubles as a template.
 
 ## Bots
 
@@ -98,6 +89,8 @@ One screen, phone-first: opponent strip, the board (central nodes and sites with
 SPEC.md, HANDOFF.md, README.md, CLAUDE.md
 reference/RULES.md     # the rules of Breachline (also fed to the Operator)
 data/cards.json        # structured card data
+packs/                 # sample custom card pack
+reference/CARD_PACKS.md  # the card pack format
 src/engine/            # state, legal actions, apply, view, invariants, rng
 src/bots/              # both bots and the bot driver
 src/operator/          # optional Claude narration client

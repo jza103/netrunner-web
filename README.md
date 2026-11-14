@@ -5,7 +5,8 @@ A single-player cyber-heist card game in the browser. You play the **Ghost** (a 
 Breachline is an original game with its own cards and rules. It is in the same genre as asymmetric hacking card games, but it is not a port of any of them. `SPEC.md` explains that decision.
 
 - Rules: `reference/RULES.md` (also in the app under 📖)
-- Cards: `data/cards.json` (40 designs; 45-card Corp deck, 40-card Ghost deck)
+- Cards: `data/cards.json` (45 designs; 52-card Corp deck, 41-card Ghost deck)
+- Your own cards: load a card pack from the start screen; the format is in `reference/CARD_PACKS.md`, with a sample in `packs/sample-pack.json`
 - Decisions and scope: `SPEC.md`
 - What is left: `HANDOFF.md`
 
@@ -23,7 +24,7 @@ docker compose up
 1. Install Node 22 LTS
 2. `npm ci`
 3. `npm run dev` and open http://localhost:5173/netrunner-web/
-4. `npm test` runs every test (about 35 seconds; it includes 500 bot-vs-bot games)
+4. `npm test` runs every test (about 50 seconds; it includes 500 bot-vs-bot games)
 5. `npm run build` writes the static site to `dist/`
 
 **Deploy.** `.github/workflows/deploy.yml` builds and publishes to GitHub Pages on every push to `main` (it runs the tests first). In the repo settings, set Pages → Source to "GitHub Actions". The site lands at `https://jza103.github.io/netrunner-web/`.
@@ -53,11 +54,12 @@ Keys are stored only in this browser's localStorage and are sent only to the pro
 
 ```
 src/engine/
-  types.ts       state, actions, events (plain JSON)
-  cards.ts       card lookup; instances are "<defId>#<n>"
+  types.ts       state, actions, events, and the Effect ops cards are built from (plain JSON)
+  cards.ts       card lookup (built-in plus the game's custom cards); instances are "<defId>#<n>"
+  pack.ts        checks a custom card pack and turns it into a GameSetup
   state.ts       newGame and read-only helpers (actor, points, ramLimit, …)
   legal.ts       legalActions(state): the single source of truth for what may be done
-  actions.ts     apply(state, action) → { ok, state } | { ok: false, error }
+  actions.ts     apply(state, action) → { ok, state } | { ok: false, error }; runEffect() interprets card effects
   view.ts        viewFor(state, side): hides what that side may not know
   invariants.ts  violations(state): card conservation and other must-holds
   rng.ts         seeded randomness (state.rngState)
@@ -65,7 +67,9 @@ src/engine/
 
 - `apply` is pure. It clones the state, never touches its input, and takes all randomness from `rngState`, so a seed replays exactly.
 - `apply` accepts exactly the actions `legalActions` lists. Anything else returns a plain-language reason.
-- `actor(state)` says whose decision it is. Runs interleave both sides: the Corp chooses whether to activate ICE (and which program a subroutine trashes); the Ghost chooses everything else.
+- `actor(state)` says whose decision it is. Runs interleave both sides: the Corp chooses whether to activate ICE, assets and upgrades during a run (and which program a subroutine trashes); the Ghost chooses everything else.
+- **Cards are data.** Every card's behaviour is a list of `Effect` ops in its JSON, interpreted by `runEffect` in `actions.ts`, with no card-specific code. Custom card packs use the same ops, so they are played by exactly the same rules code.
+- **Card packs** travel inside the state (`state.setup`): the custom card definitions and both deck lists. Custom ids are namespaced by a hash of the card's content (`x1a2b3c4d-my-card`), so `ensureCards(state)` can add them to the lookup without making `apply` depend on anything but its input. The other side's deck list is removed from each side's view.
 - The UI draws only from `viewFor(state, human)`, and the bot is only ever handed `viewFor(state, botSide)`.
 
 Debugging: `npx vite-node scripts/debug-seed.ts SEED` prints a full bot-vs-bot game; `npx vite-node scripts/sim.ts 500` prints win statistics.
@@ -104,6 +108,6 @@ Where the rules or a card could be read two ways, this is what the engine does.
 
 ## Status
 
-- Engine, all 40 card designs, both bots, UI with save/resume, the Operator, Docker and the Pages workflow are done.
-- 101 tests pass: every rule, one test block per card (with a check that no card is untested), hidden-information and Operator-leak tests, and 500 seeded bot-vs-bot games with invariant checks after every action.
+- Engine, all 45 card designs, upgrades, three damage kinds, Corp activation during runs, custom card packs, both bots, UI with save/resume, the Operator, Docker and the Pages workflow are done.
+- 129 tests pass: every rule, one test block per card (with a check that no card is untested), hidden-information and Operator-leak tests, card pack checks and 40 bot games with the sample pack, random-play fuzzing, and 500 seeded bot-vs-bot games with invariant checks after every action.
 - Not verified here: a live Operator call (no API key in the build environment) and the GitHub Pages deploy (it needs Pages switched on in the repo settings).

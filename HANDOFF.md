@@ -4,7 +4,7 @@ Read `SPEC.md` first. It explains the one big decision: this is **Breachline**, 
 
 ## State at handoff
 
-All milestones in `SPEC.md` are built. `npm run typecheck` is clean and 101 tests pass, including 500 seeded bot-vs-bot games. The app was driven end to end in a headless browser as both sides, at desktop and phone widths, with no page errors.
+All milestones in `SPEC.md` are built, plus upgrades, damage kinds, Corp activation during runs and custom card packs. `npm run typecheck` is clean and the full suite passes (see `README.md` Status), including 500 seeded bot-vs-bot games. The app was driven end to end in a headless browser as both sides, at desktop and phone widths, with no page errors; the pack sheet and a game with the sample pack were checked the same way.
 
 **Not verified:**
 
@@ -14,10 +14,20 @@ All milestones in `SPEC.md` are built. `npm run typecheck` is clean and 101 test
 
 ## Tasks, in order
 
-### 1. Decide the card set with Jason
-Jason asked (Nov 2026) for the real Netrunner card names. Claude declined to rename the set to published cards (see `CLAUDE.md`: original game). This is still open. The options offered were to keep Breachline as is, or to change the original designs so they teach the same mechanics as the real game.
+### 1. Card set and mechanics (done, Nov 2026)
+Jason asked for the real System Gateway cards. Claude declined to copy the published game (see `CLAUDE.md`). Jason then chose to close the biggest mechanical gaps and to be able to load his own cards. Done:
+- **Cards are data.** Every effect is an `Effect` op (`src/engine/types.ts`), interpreted by `runEffect` in `src/engine/actions.ts`.
+- **Upgrades:** Choke Point and Lockout Relay.
+- **Corp activation during runs.** The Corp can activate assets and upgrades while the Ghost approaches ICE, and in a new window when the run reaches the node (Watch Desk).
+- **Damage kinds:** net, meat and core (Synapse Spike, Flak Vest).
+- **Custom card packs:** `src/engine/pack.ts`, the pack sheet on the start screen, `reference/CARD_PACKS.md`, `packs/sample-pack.json`.
 
-The request was for System Gateway cards; what exists is an original 40-design set. Ask Jason whether he wants to keep Breachline as is, or change the card pool. Any new card must be an original design (see `CLAUDE.md`). Adding a card is: an entry in `data/cards.json`, its effect in `src/engine/actions.ts` (and `legal.ts` if it needs a target or a condition), a test block in `tests/cards.test.ts`, and a line of bot handling in `src/bots/bot.ts`.
+Still missing compared with the genre (no decision needed unless Jason asks): identities, traces and link, bad publicity, virus counters and purging, bypass, recurring credits, hosting, and deck building in the app.
+
+Follow-ups:
+- Corp bot win rate went from 56% to 60% (`scripts/sim.ts`). Part of task 3.
+- The Ghost bot does not plan for facedown upgrades (it does count active Lockout Relays).
+- A pack card that needs a new op cannot be written yet. Each new op needs: the type, `runEffect`, the slot table in `pack.ts`, `effectText`, a test.
 
 ### 2. Play it and fix what feels wrong
 Play at least three full games as each side on a phone. Things to look at:
@@ -43,8 +53,8 @@ Play at least three full games as each side on a phone. Things to look at:
 
 ## Where things are
 
-- Rules in words: `reference/RULES.md`. Rulings: `README.md`.
-- Engine: `src/engine` (start with `legal.ts`, then `actions.ts`).
+- Rules in words: `reference/RULES.md`. Rulings: `README.md`. Card pack format: `reference/CARD_PACKS.md`.
+- Engine: `src/engine` (start with `legal.ts`, then `actions.ts`; packs in `pack.ts`).
 - Bots: `src/bots/bot.ts`. Driver and `simulate`: `src/bots/driver.ts`.
 - Operator: prompts in `src/operator/prompt.ts`, providers in `src/operator/providers.ts`, the hook and panel in `src/ui/operator.tsx`.
 - UI: `src/ui/App.tsx`, `src/ui/styles.css`.

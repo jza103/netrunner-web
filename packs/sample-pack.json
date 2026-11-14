@@ -1,0 +1,36 @@
+{
+  "name": "Sample pack: Night Market",
+  "cards": [
+    { "id": "cold-storage-vault", "name": "Cold Storage Vault", "side": "corp", "type": "project", "copies": 2, "dev": 3, "points": 2,
+      "onScore": [{ "op": "gain", "n": 2 }, { "op": "draw", "n": 1 }],
+      "text": "When you score this, gain 2 credits and draw 1 card." },
+    { "id": "shock-lattice", "name": "Shock Lattice", "side": "corp", "type": "ice", "subtype": "cipher", "copies": 2, "cost": 3, "strength": 3,
+      "subs": [{ "op": "damage", "kind": "net", "n": 1 }, { "op": "loseCredits", "n": 1 }, { "op": "endRun" }],
+      "text": "" },
+    { "id": "toll-booth", "name": "Toll Booth", "side": "corp", "type": "upgrade", "copies": 2, "cost": 0, "trash": 2,
+      "onApproachNode": [{ "op": "payOrEndRun", "n": 2 }],
+      "text": "Upgrade. While active: when a run on this node gets past all its ICE, the Ghost loses 2 credits. If they have fewer than 2, the run ends instead." },
+    { "id": "data-farm", "name": "Data Farm", "side": "corp", "type": "asset", "copies": 2, "cost": 2, "trash": 3,
+      "onTurnStart": [{ "op": "gain", "n": 1 }, { "op": "draw", "n": 1 }],
+      "text": "While active: when your turn begins, gain 1 credit and draw 1 card." },
+    { "id": "hostile-review", "name": "Hostile Review", "side": "corp", "type": "directive", "copies": 1, "cost": 2, "playIf": "ghostHasHeat",
+      "onPlay": [{ "op": "damage", "kind": "core", "n": 1 }],
+      "text": "Play only if the Ghost has heat. Deal 1 core damage." },
+
+    { "id": "pry-bar", "name": "Pry Bar", "side": "ghost", "type": "program", "copies": 2, "cost": 2, "ram": 1,
+      "breaker": { "breaks": "wall", "strength": 2, "boostCost": 1, "boostBy": 1, "breakCost": 2 },
+      "text": "" },
+    { "id": "gel-pads", "name": "Gel Pads", "side": "ghost", "type": "gear", "copies": 1, "cost": 1, "prevent": { "net": 2 },
+      "text": "Each turn, prevent the first 2 net damage you would take." },
+    { "id": "market-stall", "name": "Market Stall", "side": "ghost", "type": "contact", "copies": 2, "cost": 1,
+      "ability": { "cycles": 1, "effects": [{ "op": "gain", "n": 2 }] },
+      "text": "Spend 1 cycle: gain 2 credits." },
+    { "id": "smash-and-grab", "name": "Smash and Grab", "side": "ghost", "type": "stunt", "copies": 2, "cost": 1,
+      "onPlay": [{ "op": "run", "node": "dump", "instead": [{ "op": "gain", "n": 4 }] }],
+      "text": "Make a run on the Dump. If it succeeds, instead of accessing cards, gain 4 credits." },
+
+    { "id": "fast-money", "name": "Fast Money", "side": "ghost", "type": "stunt", "copies": 2, "cost": 2,
+      "onPlay": [{ "op": "gain", "n": 5 }],
+      "text": "Gain 5 credits." }
+  ]
+}

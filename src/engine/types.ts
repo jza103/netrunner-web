@@ -119,7 +119,10 @@ export interface CardDef {
 export interface CardPack {
   name: string;
   cards: CardDef[];
-  /** deck lists by card id (pack or built-in) and copies; a side left out uses the built-in deck plus this pack's cards for that side */
+  /**
+   * deck lists by card id (pack card first, else built-in) and copies. A side left out uses the built-in
+   * deck, where a pack card with a built-in card's id replaces it and other pack cards are added.
+   */
   decks?: Partial<Record<Side, Record<string, number>>>;
 }
 

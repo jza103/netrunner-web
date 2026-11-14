@@ -4,26 +4,39 @@ import rulesRaw from '../../reference/RULES.md?raw';
 import { CARDS, cardOf, fullText, isHidden, nameOf } from '../engine/cards';
 import { breakerStrength, currentIce, maxHand, nodeName, points, ramLimit, ramUsed } from '../engine/state';
 import { eventText, viewFor } from '../engine/view';
-import type { GameEvent, GameState, Installed, Side } from '../engine/types';
+import type { CardDef, GameEvent, GameState, Installed, Side } from '../engine/types';
 
 const sideName = (side: Side) => (side === 'corp' ? 'the Corp' : 'the Ghost');
 
-function cardList(): string {
-  return CARDS.map((c) => {
-    const stats = [
-      c.cost !== undefined ? `cost ${c.cost}` : '',
-      c.dev !== undefined ? `needs ${c.dev} counters, ${c.points} points` : '',
-      c.strength !== undefined ? `${c.subtype}, strength ${c.strength}` : '',
-      c.trash !== undefined ? `trash cost ${c.trash}` : '',
-      c.ram !== undefined ? `${c.ram} RAM` : '',
-    ]
-      .filter(Boolean)
-      .join(', ');
-    return `- ${c.name} (${c.side} ${c.type}, ×${c.copies}; ${stats}): ${fullText(c)}`;
-  }).join('\n');
+function cardLine(c: CardDef, copies?: number): string {
+  const stats = [
+    c.cost !== undefined ? `cost ${c.cost}` : '',
+    c.dev !== undefined ? `needs ${c.dev} counters, ${c.points} points` : '',
+    c.strength !== undefined ? `${c.subtype}, strength ${c.strength}` : '',
+    c.trash !== undefined ? `trash cost ${c.trash}` : '',
+    c.ram !== undefined ? `${c.ram} RAM` : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
+  return `- ${c.name} (${c.side} ${c.type}${copies ? `, ×${copies}` : ''}; ${stats}): ${fullText(c)}`;
 }
 
-export function systemPrompt(human: Side): string {
+/**
+ * The player's own deck with copies, and every card the other side might have. Built from the
+ * player's view, which does not contain the other side's deck list.
+ */
+function cardList(v: GameState): string {
+  const me = v.human;
+  const foe: Side = me === 'corp' ? 'ghost' : 'corp';
+  const own = Object.entries(v.setup.decks[me]).map(([id, n]) => cardLine(cardOf(`${id}#1`), n));
+  const replaced = new Set(v.setup.cards.map((c) => c.id.replace(/^x[0-9a-f]{8}-/, '')));
+  const theirs = [...CARDS.filter((c) => c.side === foe && !replaced.has(c.id)), ...v.setup.cards.filter((c) => c.side === foe)].map((c) => cardLine(c));
+  return [`Your deck${v.setup.packName ? ` (card pack: ${v.setup.packName})` : ''}:`, ...own, '', `Cards ${sideName(foe)} may have (their deck list is hidden):`, ...theirs].join('\n');
+}
+
+export function systemPrompt(s: GameState): string {
+  const human = s.human;
+  const v = viewFor(s, human);
   return [
     'You are the Operator: the calm, dry voice in the player\'s ear in Breachline, a single-player cyber-heist card game',
     `web app. The player is ${sideName(human)}; a rule-based bot plays ${sideName(human === 'corp' ? 'ghost' : 'corp')}. A rules engine runs the game: it shuffles,`,
@@ -38,13 +51,14 @@ export function systemPrompt(human: Side): string {
     '- When the events include a move the player tried that the engine rejected, open with "⚖️ Not valid:" and explain the rule.',
     '- Add at most one "🎓" teaching note, only when there is a real lesson (a missed line, a risk, a rule interaction).',
     '- This is Breachline, an original game. Do not use terms or card names from other card games.',
+    "- If the game uses a card pack, its cards are the player's own designs: read them exactly as written below.",
     '',
     'The rules of Breachline:',
     '',
     rulesRaw,
     '',
-    'Every card in the game:',
-    cardList(),
+    'The cards:',
+    cardList(v),
   ].join('\n');
 }
 
@@ -70,10 +84,11 @@ export function describeTable(s: GameState): string {
   for (const n of c.nodes) {
     const ice = n.ice.length ? [...n.ice].reverse().map(inst).join(' → ') : 'no ICE';
     const root = n.id.startsWith('site') ? `; inside: ${n.root ? inst(n.root) : 'nothing'}` : '';
-    lines.push(`  ${nodeName(n.id)}: ICE outermost to innermost: ${ice}${root}`);
+    const ups = n.upgrades.length ? `; upgrades: ${n.upgrades.map(inst).join(', ')}` : '';
+    lines.push(`  ${nodeName(n.id)}: ICE outermost to innermost: ${ice}${root}${ups}`);
   }
   lines.push(
-    `Ghost: ${g.credits} credits, ${g.cycles} cycles left, heat ${g.heat}, RAM ${ramUsed(v)}/${ramLimit(v)}, ${hand('ghost')}; ` +
+    `Ghost: ${g.credits} credits, ${g.cycles} cycles left, heat ${g.heat}${g.core ? `, core damage ${g.core}` : ''}, RAM ${ramUsed(v)}/${ramLimit(v)}, ${hand('ghost')}; ` +
       `programs: ${g.programs.map(nameOf).join(', ') || '-'}; gear: ${g.gear.map(nameOf).join(', ') || '-'}; contacts: ${g.contacts.map(nameOf).join(', ') || '-'}; ` +
       `deck ${g.deck.length}; Scrapheap ${g.discard.length}.`,
   );

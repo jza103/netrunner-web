@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import rulesRaw from '../../reference/RULES.md?raw';
 import { apply } from '../engine/actions';
-import { CARDS, cardOf, fullText, isHidden, subText } from '../engine/cards';
+import { cardOf, defaultSetup, deckList, fullText, isHidden, poolOf, subText } from '../engine/cards';
+import { builtInPack, parsePack } from '../engine/pack';
 import { legalActions } from '../engine/legal';
 import { actor, breakerStrength, currentIce, findInstalled, iceStrength, maxHand, newGame, nodeName, points, ramLimit, ramUsed } from '../engine/state';
 import { eventText, viewFor } from '../engine/view';
-import { CYCLES, POINTS_TO_WIN, type Action, type CardDef, type CardId, type GameState, type Installed, type NodeState, type Side } from '../engine/types';
+import { CYCLES, POINTS_TO_WIN, type Action, type CardDef, type CardId, type GameSetup, type GameState, type Installed, type NodeState, type Side } from '../engine/types';
 import { botStep } from '../bots/driver';
 import { describeAction, icon, stats, typeLabel } from './describe';
-import { SPEED_MS, type Settings, loadGame, loadSettings, saveGame, saveSettings } from './storage';
+import { SPEED_MS, type Settings, loadGame, loadPackSetup, loadSettings, saveGame, savePackSetup, saveSettings } from './storage';
 import { type GmSettings, GmPanel, GmSettingsSheet, ProviderFields, loadGmSettings, loadKey, saveGmSettings, saveKey, useBuiltIn, useGm } from './operator';
 import { recap } from './recap';
 import { play, soundFor } from './sound';
@@ -55,12 +56,18 @@ function NewGame(props: { canContinue: boolean; onContinue: () => void; onStart:
   const gm = props.gmSettings.enabled;
   const builtIn = useBuiltIn();
   const [keys, setKeys] = useState({ anthropic: loadKey('anthropic'), openrouter: loadKey('openrouter') });
+  const [pack, setPack] = useState<GameSetup | null>(() => loadPackSetup());
+  const [packSheet, setPackSheet] = useState(false);
+  const choosePack = (p: GameSetup | null) => {
+    setPack(p);
+    savePackSetup(p);
+  };
   const start = () => {
     if (gm) {
       saveKey('openrouter', keys.openrouter);
       saveKey('anthropic', keys.anthropic);
     }
-    props.onStart(newGame({ seed: `${Date.now()}-${Math.random()}`, human: side }));
+    props.onStart(newGame({ seed: `${Date.now()}-${Math.random()}`, human: side, setup: pack ?? undefined }));
   };
   return (
     <main class="newgame">
@@ -92,6 +99,17 @@ function NewGame(props: { canContinue: boolean; onContinue: () => void; onStart:
           <span class="muted small">(optional)</span>
         </label>
         {gm && <ProviderFields settings={props.gmSettings} setSettings={props.setGmSettings} builtIn={builtIn} keys={keys} onKey={(p, k) => setKeys((x) => ({ ...x, [p]: k }))} />}
+        <div class="row packrow">
+          <span>
+            🃏 Cards: <b>{pack?.packName ?? 'Breachline core set'}</b>{' '}
+            <span class="muted small">
+              ({deckList('corp', pack ?? defaultSetup()).length} Corp, {deckList('ghost', pack ?? defaultSetup()).length} Ghost)
+            </span>
+          </span>
+          <button class="small" onClick={() => setPackSheet(true)}>
+            Change
+          </button>
+        </div>
         <button class="primary wide" onClick={start}>
           ⚡ Start a new game
         </button>
@@ -99,7 +117,8 @@ function NewGame(props: { canContinue: boolean; onContinue: () => void; onStart:
           📖 Rules and cards
         </button>
       </section>
-      {help && <HelpSheet close={() => setHelp(false)} />}
+      {help && <HelpSheet setup={pack ?? defaultSetup()} close={() => setHelp(false)} />}
+      {packSheet && <PackSheet current={pack} choose={choosePack} close={() => setPackSheet(false)} />}
     </main>
   );
 }
@@ -258,7 +277,7 @@ function Game(props: {
 
       {sheet?.kind === 'card' && <CardSheet v={v} card={sheet.card} actions={about(sheet.card)} act={act} close={() => setSheet(null)} />}
       {sheet?.kind === 'pile' && <PileSheet title={sheet.title} cards={sheet.cards} close={() => setSheet(null)} />}
-      {sheet?.kind === 'help' && <HelpSheet close={() => setSheet(null)} />}
+      {sheet?.kind === 'help' && <HelpSheet setup={state.setup} close={() => setSheet(null)} />}
       {sheet?.kind === 'operator' && <GmSettingsSheet gm={gm} settings={props.gmSettings} setSettings={props.setGmSettings} close={() => setSheet(null)} />}
     </div>
   );
@@ -663,8 +682,9 @@ function Markdown({ text }: { text: string }) {
   return <div class="md">{out}</div>;
 }
 
-function HelpSheet({ close }: { close: () => void }) {
+function HelpSheet({ close, setup }: { close: () => void; setup: GameSetup }) {
   const [tab, setTab] = useState<'rules' | 'corp' | 'ghost'>('rules');
+  const pool = poolOf({ setup });
   return (
     <div class="overlay" onClick={close}>
       <div class="sheet tall" role="dialog" aria-label="Rules and cards" onClick={(e) => e.stopPropagation()}>
@@ -684,14 +704,119 @@ function HelpSheet({ close }: { close: () => void }) {
           <Markdown text={rulesRaw.split('## Card list')[0]} />
         ) : (
           <div class="gallery">
-            {CARDS.filter((c) => c.side === tab).map((d) => (
+            {pool.filter((c) => c.side === tab).map((d) => (
               <div key={d.id} class={`entry ${d.side}`}>
                 <b>
-                  {icon(d)} {d.name} <span class="muted small">×{d.copies}</span>
+                  {icon(d)} {d.name} <span class="muted small">×{setup.decks[d.side][d.id]}</span>
                 </b>
                 <CardBody d={d} />
               </div>
             ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Card packs
+// ---------------------------------------------------------------------------
+
+function download(name: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function PackSheet({ current, choose, close }: { current: GameSetup | null; choose: (p: GameSetup | null) => void; close: () => void }) {
+  const [text, setText] = useState('');
+  const [errors, setErrors] = useState<string[]>([]);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [loaded, setLoaded] = useState('');
+  const check = (json: string) => {
+    const r = parsePack(json);
+    if (!r.ok) {
+      setErrors(r.errors);
+      setWarnings([]);
+      setLoaded('');
+      return;
+    }
+    setErrors([]);
+    setWarnings(r.warnings);
+    setLoaded(`Loaded "${r.setup.packName}": ${r.setup.cards.length} custom cards. New games use it.`);
+    choose(r.setup);
+  };
+  const onFile = async (e: Event) => {
+    const f = (e.target as HTMLInputElement).files?.[0];
+    if (!f) return;
+    const t = await f.text();
+    setText(t);
+    check(t);
+  };
+  return (
+    <div class="overlay" onClick={close}>
+      <div class="sheet tall" role="dialog" aria-label="Card pack" onClick={(e) => e.stopPropagation()}>
+        <header class="row">
+          <b>🃏 Card pack</b>
+          <button class="ghost" onClick={close} aria-label="Close">
+            ✕
+          </button>
+        </header>
+        <p class="small">
+          Now using: <b>{current?.packName ?? 'Breachline core set (built in)'}</b>. A pack is a JSON file of your own cards, written with the same effects the
+          built-in cards use. The engine checks every card before it can be played, and a saved game keeps the cards it started with.
+        </p>
+        <p class="small muted">
+          The easiest start: download the built-in set as a pack, change or add cards, and load it back. A card with the same id as a built-in card replaces it.
+          The format is in <code>reference/CARD_PACKS.md</code>.
+        </p>
+        <div class="row wrap">
+          <label class="button">
+            📂 Load a pack file
+            <input type="file" accept=".json,application/json" onChange={onFile} hidden />
+          </label>
+          <button onClick={() => download('breachline-core-set.json', JSON.stringify(builtInPack(), null, 2))}>⬇️ Download built-in set as a pack</button>
+          {current && (
+            <button
+              onClick={() => {
+                choose(null);
+                setLoaded('Back to the built-in cards.');
+                setErrors([]);
+                setWarnings([]);
+              }}
+            >
+              ↩️ Use built-in cards
+            </button>
+          )}
+        </div>
+        <label class="small">
+          Or paste pack JSON:
+          <textarea rows={8} value={text} onInput={(e) => setText((e.target as HTMLTextAreaElement).value)} spellcheck={false} />
+        </label>
+        <button class="primary" disabled={!text.trim()} onClick={() => check(text)}>
+          ✅ Check and use this pack
+        </button>
+        {loaded && <p class="ok">{loaded}</p>}
+        {warnings.length > 0 && (
+          <ul class="small warn">
+            {warnings.map((w, i) => (
+              <li key={i}>⚠️ {w}</li>
+            ))}
+          </ul>
+        )}
+        {errors.length > 0 && (
+          <div class="errors">
+            <b>The pack was not loaded:</b>
+            <ul class="small">
+              {errors.slice(0, 40).map((e, i) => (
+                <li key={i}>{e}</li>
+              ))}
+            </ul>
+            {errors.length > 40 && <p class="small">…and {errors.length - 40} more.</p>}
           </div>
         )}
       </div>

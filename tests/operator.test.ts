@@ -8,16 +8,17 @@ import { recap } from '../src/ui/recap';
 import { soundFor } from '../src/ui/sound';
 import { botStep, simulate } from '../src/bots/driver';
 import { CARDS } from '../src/engine/cards';
+import { newGame } from '../src/engine/state';
 import { act, blank, ghostTurn, hand, ice, site } from './helpers';
 
 describe('Operator prompts', () => {
   it('the system prompt carries the rules, every card and the hard limits', () => {
-    const sys = systemPrompt('ghost');
+    const sys = systemPrompt(newGame({ seed: 1, human: 'ghost' }));
     expect(sys).toContain('You are the Operator');
     expect(sys).toContain('Never invent');
     expect(sys).toContain('## Runs');
     for (const c of CARDS) expect(sys).toContain(c.name);
-    expect(systemPrompt('corp')).toContain('The player is the Corp');
+    expect(systemPrompt(newGame({ seed: 1, human: 'corp' }))).toContain('The player is the Corp');
   });
 
   it('as the Ghost: never leaks the Corp hand, facedown cards or the deck', () => {

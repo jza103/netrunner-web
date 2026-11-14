@@ -3,7 +3,7 @@ import { apply } from '../engine/actions';
 import { isLegal, legalActions } from '../engine/legal';
 import { actor, newGame } from '../engine/state';
 import { viewFor } from '../engine/view';
-import type { Action, GameState, Side } from '../engine/types';
+import type { Action, GameSetup, GameState, Side } from '../engine/types';
 import { chooseAction } from './bot';
 
 export interface StepResult {
@@ -38,13 +38,15 @@ export function botStep(s: GameState, isBot: (side: Side) => boolean = () => tru
 
 export interface SimOptions {
   seed: number | string;
+  /** custom cards; the built-in set when left out */
+  setup?: GameSetup;
   maxSteps?: number;
   onStep?: (r: StepResult) => void;
 }
 
 /** Play a whole game with both seats run by bots. */
 export function simulate(opts: SimOptions): { state: GameState; steps: number; fallbacks: number } {
-  let s = newGame({ seed: opts.seed, human: 'ghost' });
+  let s = newGame({ seed: opts.seed, human: 'ghost', setup: opts.setup });
   let steps = 0;
   let fallbacks = 0;
   const max = opts.maxSteps ?? 20000;

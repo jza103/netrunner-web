@@ -172,7 +172,7 @@ export function useGm(s: GameState, settings: GmSettings) {
     const update = (text: string, done = false, errKind?: GmEntry['kind']) =>
       setMem((m) => ({ ...m, entries: m.entries.map((e) => (e.id === id ? { ...e, text, streaming: !done, kind: errKind ?? e.kind } : e)) }));
     try {
-      const r = await call({ system: systemPrompt(s.human), user, kind, onText: (t) => update(t) });
+      const r = await call({ system: systemPrompt(s), user, kind, onText: (t) => update(t) });
       update(r.refused && !r.text ? '(The Operator declined to narrate this one.)' : r.text, true);
     } catch (e) {
       const ge = e instanceof GmError ? e : new GmError(String(e));
