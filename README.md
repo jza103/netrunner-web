@@ -29,7 +29,10 @@ docker compose up
 
 **Deploy.** `.github/workflows/deploy.yml` builds and publishes to GitHub Pages on every push to `main` (it runs the tests first). In the repo settings, set Pages → Source to "GitHub Actions". The site lands at `https://jza103.github.io/netrunner-web/`.
 
-**As a claude.ai artifact.** `npm run build:artifact` writes the artifact page and its assets to `dist-artifact/`. Published as an artifact with the `sample` capability, the Operator can use the viewer's own Claude plan with no key.
+**As a claude.ai artifact.** `npm run build:artifact` writes the artifact page and its assets to `dist-artifact/`.
+- Publish `dist-artifact/page.html` with every file in `dist-artifact/assets/` as supporting files, and with `capabilities: { sample: {} }`. Without that capability the Operator cannot use built-in Claude, and offers only API keys.
+- With it, the Operator uses the viewer's own Claude plan, with no key.
+- Jason's private copy: https://claude.ai/artifact/YbK7QzqCb5adQv7VVfJpoL. Republishing to that URL keeps it, and its saved games stay in that browser.
 
 ## How to play (short version)
 
