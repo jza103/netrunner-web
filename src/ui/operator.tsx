@@ -1,9 +1,9 @@
-// Optional GM mode. Reads engine events and the human's view; never changes game state.
+// Optional Operator mode. Reads engine events and the human's view; never changes game state.
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { GameEvent, GameState } from '../engine/types';
-import { actor } from '../bots/bot';
-import { DEFAULT_GM_MODEL, GM_MODELS, type GmModel } from '../gm/models';
-import { eventsWithTurnPlayer, narrationPrompt, questionPrompt, systemPrompt } from '../gm/prompt';
+import { actor } from '../engine/state';
+import { DEFAULT_GM_MODEL, GM_MODELS, type GmModel } from '../operator/models';
+import { eventsWithTurnPlayer, narrationPrompt, questionPrompt, systemPrompt } from '../operator/prompt';
 import {
   GmError,
   type GmCall,
@@ -16,12 +16,12 @@ import {
   runAnthropic,
   runClaudeAi,
   runOpenRouter,
-} from '../gm/providers';
+} from '../operator/providers';
 
-const KEY = 'munchkin-web:gm:v1';
+const KEY = 'breachline:operator:v1';
 const KEYS: Record<'anthropic' | 'openrouter', string> = {
-  anthropic: 'munchkin-web:gm-key:v1',
-  openrouter: 'munchkin-web:gm-openrouter-key:v1',
+  anthropic: 'breachline:operator-key:v1',
+  openrouter: 'breachline:operator-openrouter-key:v1',
 };
 
 export interface GmSettings {
@@ -43,7 +43,7 @@ export interface GmEntry {
 }
 
 interface GmMemory {
-  seed: number;
+  seed: string;
   lastSeq: number;
   recapped: boolean;
   entries: GmEntry[];
@@ -123,7 +123,7 @@ export function pickEvents(s: GameState, lastSeq: number, onlyMyTurns: boolean):
   if (!waitingOnHuman) return null;
   let fresh = s.events.filter((e) => e.seq > lastSeq);
   if (onlyMyTurns && s.phase !== 'gameOver')
-    fresh = eventsWithTurnPlayer(s.events, s.order[0])
+    fresh = eventsWithTurnPlayer(s.events, 'corp')
       .filter(({ e, turnPlayer }) => e.seq > lastSeq && turnPlayer === s.human)
       .map(({ e }) => e);
   return fresh.length ? fresh : null;
@@ -134,8 +134,8 @@ export function useGm(s: GameState, settings: GmSettings) {
   const [keys, setKeys] = useState({ anthropic: loadKey('anthropic'), openrouter: loadKey('openrouter') });
   const provider = resolveProvider(settings, builtIn, keys);
   const [mem, setMem] = useState<GmMemory>(() => {
-    const m = read<GmMemory>(`${KEY}:memory`, { seed: s.seed, lastSeq: 0, recapped: false, entries: [] });
-    return m.seed === s.seed ? m : { seed: s.seed, lastSeq: Math.max(0, s.eventSeq - 12), recapped: false, entries: [] };
+    const m = read<GmMemory>(`${KEY}:memory`, { seed: s.gameId, lastSeq: 0, recapped: false, entries: [] });
+    return m.seed === s.gameId ? m : { seed: s.gameId, lastSeq: Math.max(0, s.seq - 12), recapped: false, entries: [] };
   });
   const [busy, setBusy] = useState(false);
   // after an error, automatic narration waits for the player's next move (never retries by itself)
@@ -146,11 +146,11 @@ export function useGm(s: GameState, settings: GmSettings) {
 
   useEffect(() => write(`${KEY}:memory`, { ...mem, entries: mem.entries.filter((e) => !e.streaming).slice(-40) }), [mem]);
   useEffect(() => {
-    if (mem.seed !== s.seed) setMem({ seed: s.seed, lastSeq: Math.max(0, s.eventSeq - 12), recapped: false, entries: [] });
-  }, [s.seed]);
+    if (mem.seed !== s.gameId) setMem({ seed: s.gameId, lastSeq: Math.max(0, s.seq - 12), recapped: false, entries: [] });
+  }, [s.gameId]);
   const wasOn = useRef(settings.enabled);
   useEffect(() => {
-    if (settings.enabled && !wasOn.current) setMem((m) => ({ ...m, lastSeq: Math.max(m.lastSeq, s.eventSeq - 12) }));
+    if (settings.enabled && !wasOn.current) setMem((m) => ({ ...m, lastSeq: Math.max(m.lastSeq, s.seq - 12) }));
     wasOn.current = settings.enabled;
   }, [settings.enabled]);
 
@@ -162,7 +162,7 @@ export function useGm(s: GameState, settings: GmSettings) {
     }
     if (provider === 'openrouter') return runOpenRouter(keys.openrouter, settings.orModel || OPENROUTER_DEFAULT_MODEL, c);
     if (provider === 'anthropic') return runAnthropic(keys.anthropic, settings.model, c);
-    throw new GmError('Set up the GM first (GM settings).');
+    throw new GmError('Set up the Operator first (Operator settings).');
   };
 
   const run = async (kind: 'narration' | 'answer', user: string, after: (m: GmMemory) => GmMemory) => {
@@ -172,8 +172,8 @@ export function useGm(s: GameState, settings: GmSettings) {
     const update = (text: string, done = false, errKind?: GmEntry['kind']) =>
       setMem((m) => ({ ...m, entries: m.entries.map((e) => (e.id === id ? { ...e, text, streaming: !done, kind: errKind ?? e.kind } : e)) }));
     try {
-      const r = await call({ system: systemPrompt(), user, kind, onText: (t) => update(t) });
-      update(r.refused && !r.text ? '(The GM declined to narrate this one.)' : r.text, true);
+      const r = await call({ system: systemPrompt(s.human), user, kind, onText: (t) => update(t) });
+      update(r.refused && !r.text ? '(The Operator declined to narrate this one.)' : r.text, true);
     } catch (e) {
       const ge = e instanceof GmError ? e : new GmError(String(e));
       if (ge.pause) setPaused(true);
@@ -193,7 +193,7 @@ export function useGm(s: GameState, settings: GmSettings) {
       void run('answer', narrationPrompt({ state: s, events: s.events.slice(-250), rejected: [], recent: recent() }), (m) => ({
         ...m,
         recapped: true,
-        lastSeq: s.eventSeq,
+        lastSeq: s.seq,
       }));
       return;
     }
@@ -203,7 +203,7 @@ export function useGm(s: GameState, settings: GmSettings) {
     rejected.current = [];
     void run('narration', narrationPrompt({ state: s, events: events ?? [], rejected: rej, recent: recent() }), (m) => ({
       ...m,
-      lastSeq: s.eventSeq,
+      lastSeq: s.seq,
     }));
   }, [s, settings.enabled, provider, busy, paused, tick]);
 
@@ -248,10 +248,10 @@ export function GmPanel({ gm, settings, onSettings }: { gm: Gm; settings: GmSett
   }, [gm.entries]);
   if (!settings.enabled) return null;
   return (
-    <section class="panel gm" aria-label="Game master">
+    <section class="panel gm" aria-label="Operator">
       <header class="row">
         <span>
-          🎙️ Game master {gm.busy && <span class="muted small">· narrating…</span>}
+          🎧 Operator {gm.busy && <span class="muted small">· narrating…</span>}
           {gm.paused && !gm.busy && <span class="muted small">· paused until your next move</span>}
         </span>
         <button class="ghost small" onClick={onSettings}>
@@ -263,10 +263,10 @@ export function GmPanel({ gm, settings, onSettings }: { gm: Gm; settings: GmSett
           {gm.builtIn === undefined ? 'Checking for built-in Claude…' : 'Add an OpenRouter or Anthropic API key in '}
           {gm.builtIn !== undefined && (
             <button class="linkish" onClick={onSettings}>
-              GM settings
+              Operator settings
             </button>
           )}
-          {gm.builtIn !== undefined && ' to hear the GM.'}
+          {gm.builtIn !== undefined && ' to hear the Operator.'}
         </p>
       ) : (
         <>
@@ -276,7 +276,7 @@ export function GmPanel({ gm, settings, onSettings }: { gm: Gm; settings: GmSett
                 {e.kind === 'question' ? <b>You: {e.text}</b> : e.text || (e.streaming ? 'Thinking…' : '')}
               </li>
             ))}
-            {!gm.entries.length && <li class="muted small">The GM speaks when it's your move.</li>}
+            {!gm.entries.length && <li class="muted small">The Operator speaks when it's your move.</li>}
           </ol>
           <form
             class="ask"
@@ -286,7 +286,7 @@ export function GmPanel({ gm, settings, onSettings }: { gm: Gm; settings: GmSett
               setQ('');
             }}
           >
-            <input id="gm-ask" aria-label="Ask the GM" placeholder="Ask the GM a rules question…" value={q} onInput={(e) => setQ((e.target as HTMLInputElement).value)} />
+            <input id="gm-ask" aria-label="Ask the Operator" placeholder="Ask the Operator a rules question…" value={q} onInput={(e) => setQ((e.target as HTMLInputElement).value)} />
             <button disabled={gm.busy || !q.trim()}>Ask</button>
           </form>
         </>
@@ -376,19 +376,19 @@ export function GmSettingsSheet(props: { gm: Gm; settings: GmSettings; setSettin
   };
   return (
     <div class="overlay" onClick={props.close}>
-      <div class="sheet" role="dialog" aria-label="GM settings" onClick={(e) => e.stopPropagation()}>
+      <div class="sheet" role="dialog" aria-label="Operator settings" onClick={(e) => e.stopPropagation()}>
         <header>
-          <b>🎙️ GM settings</b>
+          <b>🎧 Operator settings</b>
           <button class="ghost" onClick={props.close} aria-label="Close">
             ✕
           </button>
         </header>
         <p class="small muted">
-          The GM narrates, rules on moves and teaches. It never changes the game, and it only sees your view: rival hands are
-          counts. Keys stay in this browser and go only to the service you pick.
+          The Operator narrates, rules on moves and teaches. It never changes the game, and it only sees your side's view: the other hand and facedown cards stay
+          hidden. Keys stay in this browser and go only to the service you pick.
         </p>
         <label class="chip">
-          <input type="checkbox" checked={settings.enabled} onChange={() => setSettings({ ...settings, enabled: !settings.enabled })} /> GM mode on
+          <input type="checkbox" checked={settings.enabled} onChange={() => setSettings({ ...settings, enabled: !settings.enabled })} /> Operator mode on
         </label>
         <ProviderFields settings={settings} setSettings={setSettings} builtIn={gm.builtIn} keys={keys} onKey={(p, k) => setKeys((x) => ({ ...x, [p]: k }))} />
         <label class="chip">
@@ -409,7 +409,7 @@ export function GmSettingsSheet(props: { gm: Gm; settings: GmSettings; setSettin
             Forget keys
           </button>
           <button class="ghost" onClick={gm.clear}>
-            Clear GM log
+            Clear Operator log
           </button>
         </div>
       </div>

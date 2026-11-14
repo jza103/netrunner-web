@@ -16,6 +16,6 @@ const html = readFileSync('dist-artifact/index.html', 'utf8');
 const tags = [...html.matchAll(/<(?:script|link)\b[^>]*(?:><\/script>|>)/g)]
   .map((m) => m[0])
   .filter((t) => !/rel="icon"/.test(t));
-const page = ['<title>Munchkin Card Game</title>', ...tags.filter((t) => t.startsWith('<link')), '<div id="app"></div>', ...tags.filter((t) => t.startsWith('<script'))].join('\n');
+const page = ['<title>Breachline</title>', ...tags.filter((t) => t.startsWith('<link')), '<div id="app"></div>', ...tags.filter((t) => t.startsWith('<script'))].join('\n');
 writeFileSync('dist-artifact/page.html', page + '\n');
 console.log(page);

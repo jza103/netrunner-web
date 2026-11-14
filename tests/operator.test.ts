@@ -1,75 +1,114 @@
 import { describe, expect, it } from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
-import { describeTable, narrationPrompt, questionPrompt, skillSection, systemPrompt } from '../src/gm/prompt';
-import { streamGm } from '../src/gm/client';
-import { pickEvents } from '../src/ui/gm';
+import { describeTable, narrationPrompt, questionPrompt, systemPrompt } from '../src/operator/prompt';
+import { streamGm } from '../src/operator/client';
+import { GmError, runClaudeAi, runOpenRouter } from '../src/operator/providers';
+import { DEFAULT_GM, pickEvents, resolveProvider } from '../src/ui/operator';
 import { recap } from '../src/ui/recap';
 import { soundFor } from '../src/ui/sound';
-import { simulate } from '../src/bots/driver';
-import { nameOf } from '../src/engine/cards';
-import { A, J, act, blank, give, kick } from './helpers';
+import { botStep, simulate } from '../src/bots/driver';
+import { CARDS } from '../src/engine/cards';
+import { act, blank, ghostTurn, hand, ice, site } from './helpers';
 
-describe('GM prompts', () => {
-  it('system prompt carries the skill’s narration, rules and rival sections, not its engine commands', () => {
-    const sys = systemPrompt();
-    expect(skillSection('Narration style')).toContain('⚖️');
-    expect(sys).toContain('## Narration style');
-    expect(sys).toContain('## Rules cheat sheet');
-    expect(sys).toContain('## Playing the rivals');
+describe('Operator prompts', () => {
+  it('the system prompt carries the rules, every card and the hard limits', () => {
+    const sys = systemPrompt('ghost');
+    expect(sys).toContain('You are the Operator');
     expect(sys).toContain('Never invent');
-    expect(sys).not.toMatch(/munchkin\.py/);
+    expect(sys).toContain('## Runs');
+    for (const c of CARDS) expect(sys).toContain(c.name);
+    expect(systemPrompt('corp')).toContain('The player is the Corp');
   });
 
-  it('never leaks rival hand contents, only counts', () => {
-    let s = blank();
-    const secret = give(s, A, 'Plutonium Dragon');
-    give(s, A, 'Wishing Ring');
-    const mine = give(s, J, 'Magic Missile');
-    s = kick(s, 'Pit Bull');
+  it('as the Ghost: never leaks the Corp hand, facedown cards or the deck', () => {
+    let s = blank('ghost');
+    const [w, p] = hand(s, 'corp', 'black-mamba', 'orbital-mandate');
+    hand(s, 'corp', 'burn-notice');
+    const [mine] = hand(s, 'ghost', 'mirrorshade');
+    void mine;
+    s = act(s, { type: 'install', card: w, node: 'command' });
+    s = act(s, { type: 'install', card: p, node: 'new' });
     const text = narrationPrompt({ state: s, events: s.events, rejected: [], recent: [] }) + questionPrompt(s, 'what now?', s.events) + describeTable(s);
-    expect(text).not.toContain(nameOf(secret));
-    expect(text).not.toContain('Wishing Ring');
-    expect(text).toContain(nameOf(mine));
-    expect(text).toContain('2 cards (1 Door, 1 Treasure)');
-    expect(text).toContain('Pit Bull');
+    for (const secret of ['Black Mamba', 'Orbital Mandate', 'Burn Notice']) expect(text).not.toContain(secret);
+    expect(text).toContain('Mirrorshade');
+    expect(text).toContain('hand: 1 cards (hidden)');
+    expect(text).toContain('facedown card');
+  });
+
+  it('as the Corp: sees its own cards, never the Ghost hand', () => {
+    let s = blank('corp');
+    const [w] = hand(s, 'corp', 'black-mamba');
+    hand(s, 'ghost', 'jackknife');
+    s = act(s, { type: 'install', card: w, node: 'command' });
+    const text = narrationPrompt({ state: s, events: s.events, rejected: [], recent: [] }) + describeTable(s);
+    expect(text).toContain('You install Black Mamba protecting Command');
+    expect(text).not.toContain('Jackknife');
+  });
+
+  it('describes a run in progress', () => {
+    let s = ghostTurn(blank('ghost'));
+    ice(s, 'command', 'bulkhead');
+    s = act(s, { type: 'run', node: 'command' });
+    expect(describeTable(s)).toMatch(/Run in progress on Command, step: encounter, at Bulkhead/);
   });
 
   it('includes rejected moves for a ⚖️ ruling', () => {
-    const s = blank();
-    const p = narrationPrompt({ state: s, events: [], rejected: ['Sell Huge Rock — engine says: no Gold value'], recent: [] });
+    const p = narrationPrompt({ state: blank(), events: [], rejected: ['Install Sledge — engine says: Sledge costs 4 and you have 1.'], recent: [] });
     expect(p).toContain('rejected');
-    expect(p).toContain('Huge Rock');
+    expect(p).toContain('Sledge costs 4');
   });
 
-  it('asks for the end-of-game recap when the game is over', () => {
-    const { state } = simulate({ seed: 3, rivals: 2 });
-    const p = narrationPrompt({ state, events: state.events, rejected: [], recent: [] });
-    expect(p).toContain('3 or 4 moments');
+  it('asks for the debrief when the game is over', () => {
+    const { state } = simulate({ seed: 3 });
+    expect(narrationPrompt({ state, events: state.events, rejected: [], recent: [] })).toContain('3 or 4 moments');
   });
 });
 
-describe('when the GM speaks', () => {
+describe('when the Operator speaks', () => {
   it('only when the game is waiting on the human, and only with new events', () => {
-    let s = blank();
+    let s = blank('corp');
     expect(pickEvents(s, 0, false)?.length).toBeGreaterThan(0);
-    expect(pickEvents(s, s.eventSeq, false)).toBeNull();
-    s = act(s, { type: 'kickDoor', player: J });
-    s.turn = A; // a bot is acting: wait
-    s.phase = 'setup';
-    s.combat = null;
-    s.pending = null;
+    expect(pickEvents(s, s.seq, false)).toBeNull();
+    s = ghostTurn(s); // the bot is acting: wait
     expect(pickEvents(s, 0, false)).toBeNull();
   });
 
-  it('"only my turns" skips events from rival turns', () => {
-    const { state } = simulate({ seed: 5, rivals: 2 });
-    const all = pickEvents(state, 0, false)!;
-    const mine = pickEvents({ ...state, phase: 'setup', turn: state.human, pending: null, combat: null }, 0, true) ?? [];
+  it('"only my turns" skips events from the bot\'s turns', () => {
+    let s = blank('corp');
+    for (let i = 0; i < 3; i++) s = act(s, { type: 'credit' });
+    s = act(s, { type: 'endTurn' });
+    while (s.turn === 'ghost') s = botStep(s)!.state;
+    const all = pickEvents(s, 0, false)!;
+    const mine = pickEvents(s, 0, true)!;
     expect(mine.length).toBeLessThan(all.length);
+    expect(mine.some((e) => e.side === 'ghost' && e.type === 'credit')).toBe(false);
   });
 });
 
-describe('GM client', () => {
+describe('recap and sound', () => {
+  it('the recap ends with the result and lists at most 5 key moments before it', () => {
+    const { state } = simulate({ seed: 11 });
+    const r = recap(state);
+    expect(r.length).toBeGreaterThan(1);
+    expect(r.length).toBeLessThanOrEqual(6);
+    expect(r.at(-1)).toMatch(/wins/);
+  });
+  it('plays the most dramatic sound for a batch of events', () => {
+    const ev = (type: string) => ({ seq: 1, type, text: '' });
+    expect(soundFor([ev('run'), ev('encounter'), ev('damage')])).toBe('damage');
+    expect(soundFor([ev('credit')])).toBeNull();
+    expect(soundFor([ev('steal'), ev('gameOver')])).toBe('gameOver');
+  });
+  it('a trap in a site is described to both sides', () => {
+    let s = ghostTurn(blank());
+    const { id } = site(s, 'decoy-lab');
+    hand(s, 'ghost', 'crowbar', 'crowbar', 'crowbar');
+    s = act(s, { type: 'run', node: id });
+    expect(s.events.some((e) => e.type === 'trap' && /Decoy Lab/.test(e.text))).toBe(true);
+  });
+});
+
+describe('Operator client', () => {
   function fakeClient(chunks: string[], stop = 'end_turn') {
     const calls: unknown[] = [];
     const client = {
@@ -117,28 +156,7 @@ describe('GM client', () => {
   });
 });
 
-describe('end-of-game recap and sound', () => {
-  it('recap picks at most 4 moments, ending with the winning kill', () => {
-    const { state } = simulate({ seed: 11, rivals: 3 });
-    const r = recap(state);
-    expect(r.length).toBeGreaterThan(0);
-    expect(r.length).toBeLessThanOrEqual(4);
-    expect(r.at(-1)!.text).toContain('defeat');
-    expect(recap(blank())).toEqual([]);
-  });
-
-  it('plays the most dramatic sound for a batch of events', () => {
-    const ev = (type: string, text = '', data?: Record<string, unknown>) => ({ seq: 1, turn: 1, type, text, data });
-    expect(soundFor([ev('door'), ev('death', 'Jason is DEAD.')])).toBe('death');
-    expect(soundFor([ev('level', '', { from: 2, to: 3 })])).toBe('levelUp');
-    expect(soundFor([ev('note')])).toBeNull();
-  });
-});
-
-import { GmError, runClaudeAi, runOpenRouter } from '../src/gm/providers';
-import { DEFAULT_GM, resolveProvider } from '../src/ui/gm';
-
-describe('GM providers', () => {
+describe('Operator providers', () => {
   const call = (kind: 'narration' | 'answer' = 'narration') => {
     const seen: string[] = [];
     return { seen, c: { system: 'SYS', user: 'USER', kind, onText: (t: string) => seen.push(t) } };

@@ -21,7 +21,7 @@ Why: the assistant that built this does not recreate a specific existing game (i
 **In v1**
 
 - Full rules of Breachline (see `reference/RULES.md`): turns, cycles, credits, installing, ICE, runs with approach / encounter / break / jack out / access, damage, heat, scoring and stealing, all win conditions
-- All 40 card designs (86 cards: a 46-card Corp deck and a 40-card Ghost deck)
+- All 40 card designs (85 cards: a 45-card Corp deck and a 40-card Ghost deck)
 - A rule-based bot for each side
 - Save and resume in the browser
 - Phone-first layout that also works on tablet and desktop

@@ -12,6 +12,7 @@ export function newGame(opts: NewGameOptions): GameState {
   const s: GameState = {
     rngState: seedFrom(opts.seed),
     human: opts.human,
+    gameId: String(opts.seed),
     turn: 'corp',
     turnNumber: 0,
     phase: 'mulligan',

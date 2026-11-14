@@ -14,7 +14,7 @@ export type MakeClient = (apiKey: string) => Anthropic;
 
 export const makeClient: MakeClient = (apiKey) => new Anthropic({ apiKey, dangerouslyAllowBrowser: true, maxRetries: 2 });
 
-/** Stream one GM reply. `onText` receives the reply so far as it grows. */
+/** Stream one Operator reply. `onText` receives the reply so far as it grows. */
 export async function streamGm(
   client: Anthropic,
   opts: { model: GmModel; system: string; user: string; signal?: AbortSignal },
@@ -45,7 +45,7 @@ export async function streamGm(
 
 /** A short, human message for an API failure. */
 export function explainError(e: unknown): string {
-  if (e instanceof Anthropic.AuthenticationError) return 'The API key was rejected. Check it in GM settings.';
+  if (e instanceof Anthropic.AuthenticationError) return 'The API key was rejected. Check it in Operator settings.';
   if (e instanceof Anthropic.PermissionDeniedError) return "This API key isn't allowed to use that model.";
   if (e instanceof Anthropic.NotFoundError) return 'That model is not available to this key.';
   if (e instanceof Anthropic.RateLimitError) return 'Rate limited by the API. Narration will resume on the next event.';

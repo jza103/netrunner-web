@@ -5,7 +5,7 @@ import { violations } from '../src/engine/invariants';
 import { isLegal, legalActions } from '../src/engine/legal';
 import { apply } from '../src/engine/actions';
 
-describe.each([0, 1, 2, 3, 4])('seeds %i00 to %i99', (block) => {
+describe.each([0, 1, 2, 3, 4])('seed block %i (100 games)', (block) => {
   it('every game ends with a winner and no illegal state', () => {
     let fallbacks = 0;
     for (let i = 0; i < 100; i++) {

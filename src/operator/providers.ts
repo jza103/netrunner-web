@@ -1,4 +1,4 @@
-// Where GM narration comes from. Three options:
+// Where Operator narration comes from. Three options:
 //  - 'claude-ai'  : Claude built into claude.ai, when the app runs as a claude.ai artifact.
 //                   Uses the viewer's own Claude plan; no key. (Not available on GitHub Pages.)
 //  - 'openrouter' : an OpenRouter API key, called straight from the browser.
@@ -62,7 +62,7 @@ export function builtInClaude(): Promise<SampleFn | null> {
 export function sampleErrorText(e: SampleError): string {
   switch (e.code) {
     case 'not_granted':
-      return 'You did not allow this page to use Claude. Reload the page to be asked again, or turn GM mode off.';
+      return 'You did not allow this page to use Claude. Reload the page to be asked again, or turn Operator mode off.';
     case 'sampling_disabled':
       return 'Claude is not available for this account here.';
     case 'rate_limited':
@@ -70,7 +70,7 @@ export function sampleErrorText(e: SampleError): string {
     case 'session_expired':
       return 'Your claude.ai session expired. Sign in again.';
     case 'refused':
-      return '(The GM declined to narrate this one.)';
+      return '(The Operator declined to narrate this one.)';
     case 'cancelled':
       return 'Cancelled.';
     case 'prompt_too_large':
@@ -121,10 +121,10 @@ export async function openRouterModels(fetchImpl: typeof fetch = fetch): Promise
 }
 
 function openRouterHttpError(status: number, message: string): GmError {
-  if (status === 401) return new GmError('OpenRouter rejected the API key. Check it in GM settings.');
+  if (status === 401) return new GmError('OpenRouter rejected the API key. Check it in Operator settings.');
   if (status === 402) return new GmError('Your OpenRouter account is out of credits.');
   if (status === 403) return new GmError(`OpenRouter refused the request: ${message}`);
-  if (status === 404) return new GmError('That model is not available on OpenRouter. Pick another in GM settings.');
+  if (status === 404) return new GmError('That model is not available on OpenRouter. Pick another in Operator settings.');
   if (status === 429) return new GmError('OpenRouter rate limit. Narration pauses until your next move.');
   return new GmError(`OpenRouter error ${status}: ${message}`);
 }
@@ -138,7 +138,7 @@ export async function runOpenRouter(apiKey: string, model: string, call: GmCall,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
-        'X-Title': 'Munchkin web app',
+        'X-Title': 'Breachline web app',
       },
       body: JSON.stringify({
         model,
@@ -146,7 +146,7 @@ export async function runOpenRouter(apiKey: string, model: string, call: GmCall,
         max_tokens: call.kind === 'narration' ? 1500 : 3000,
         reasoning: { effort: 'low' },
         messages: [
-          // cache_control keeps the long, unchanging GM instructions cached on Claude models
+          // cache_control keeps the long, unchanging Operator instructions cached on Claude models
           { role: 'system', content: [{ type: 'text', text: call.system, cache_control: { type: 'ephemeral' } }] },
           { role: 'user', content: call.user },
         ],

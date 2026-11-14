@@ -130,6 +130,8 @@ export interface GameEvent {
 export interface GameState {
   rngState: number;
   human: Side;
+  /** identifies this game (from the seed); used to key saved Operator memory */
+  gameId: string;
   turn: Side;
   turnNumber: number;
   phase: Phase;
