@@ -1,0 +1,47 @@
+// Checks that must hold after every action. Used by the soak tests.
+import { cardOf, deckList } from './cards';
+import { maxHand, ramLimit, ramUsed } from './state';
+import { MAX_ICE, type CardId, type GameState } from './types';
+
+export function allCards(s: GameState): CardId[] {
+  const c = s.corp;
+  const g = s.ghost;
+  const out = [...c.hand, ...c.deck, ...c.discard, ...c.scored, ...c.removed, ...g.hand, ...g.deck, ...g.discard, ...g.scored, ...g.programs, ...g.gear, ...g.contacts];
+  for (const n of c.nodes) {
+    if (n.root) out.push(n.root.card);
+    for (const i of n.ice) out.push(i.card);
+  }
+  return out;
+}
+
+const EXPECTED = [...deckList('corp'), ...deckList('ghost')].sort().join(',');
+
+export function violations(s: GameState): string[] {
+  const v: string[] = [];
+  const c = s.corp;
+  const g = s.ghost;
+  if (allCards(s).sort().join(',') !== EXPECTED) v.push('cards are not conserved (a card is missing or duplicated)');
+  if (c.credits < 0 || g.credits < 0) v.push('negative credits');
+  if (c.cycles < 0 || g.cycles < 0) v.push('negative cycles');
+  if (g.heat < 0) v.push('negative heat');
+  if (ramUsed(s) > ramLimit(s)) v.push('programs exceed RAM');
+  for (const n of c.nodes) {
+    if (n.ice.length > MAX_ICE) v.push(`${n.id} has too much ICE`);
+    for (const i of n.ice) if (cardOf(i.card).type !== 'ice') v.push(`${i.card} is installed as ICE`);
+    if (n.root && !['project', 'asset'].includes(cardOf(n.root.card).type)) v.push(`${n.root.card} cannot be in a site`);
+    if (n.root && !n.id.startsWith('site')) v.push(`central node ${n.id} has a root card`);
+  }
+  for (const x of c.discardSeen) if (!c.discard.includes(x)) v.push(`${x} is marked seen but is not in the Dump`);
+  for (const x of [...c.scored, ...g.scored]) if (cardOf(x).type !== 'project') v.push(`${x} is in a score area`);
+  for (const x of g.programs) if (cardOf(x).type !== 'program') v.push(`${x} is installed as a program`);
+  if (s.phase === 'run' && !s.run) v.push('run phase without a run');
+  if (s.phase !== 'run' && s.run) v.push('run outside the run phase');
+  if (s.phase === 'gameOver' && !s.winner) v.push('game over without a winner');
+  // at the start of a turn the previous player is at or under their hand limit
+  const last = s.events[s.events.length - 1];
+  if (s.phase === 'action' && last?.type === 'turn') {
+    const prev = s.turn === 'corp' ? 'ghost' : 'corp';
+    if (s[prev].hand.length > maxHand(s, prev)) v.push(`${prev} ended the turn over the hand limit`);
+  }
+  return v;
+}

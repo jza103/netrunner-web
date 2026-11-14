@@ -1,0 +1,48 @@
+// 500 seeded bot-vs-bot games with no illegal states.
+import { describe, expect, it } from 'vitest';
+import { simulate } from '../src/bots/driver';
+import { violations } from '../src/engine/invariants';
+import { isLegal, legalActions } from '../src/engine/legal';
+import { apply } from '../src/engine/actions';
+
+describe.each([0, 1, 2, 3, 4])('seeds %i00 to %i99', (block) => {
+  it('every game ends with a winner and no illegal state', () => {
+    let fallbacks = 0;
+    for (let i = 0; i < 100; i++) {
+      const seed = block * 100 + i + 1;
+      const r = simulate({
+        seed,
+        maxSteps: 5000,
+        onStep: (x) => {
+          const v = violations(x.state);
+          if (v.length) throw new Error(`seed ${seed}: ${x.actor} ${x.action.type}: ${v.join('; ')}`);
+        },
+      });
+      expect(r.state.phase, `seed ${seed}`).toBe('gameOver');
+      expect(r.state.winner).not.toBeNull();
+      fallbacks += r.fallbacks;
+    }
+    expect(fallbacks).toBe(0);
+  });
+});
+
+describe('legalActions and apply agree', () => {
+  it('every listed action applies, and the state always offers a move', () => {
+    for (let seed = 900; seed < 920; seed++) {
+      simulate({
+        seed,
+        onStep: (x) => {
+          if (x.state.phase === 'gameOver') return;
+          const legal = legalActions(x.state);
+          expect(legal.length, `seed ${seed}: no legal action`).toBeGreaterThan(0);
+          for (const a of legal) {
+            const r = apply(x.state, a);
+            expect(r.ok, `seed ${seed}: ${JSON.stringify(a)}`).toBe(true);
+            if (r.ok) expect(violations(r.state)).toEqual([]);
+          }
+          expect(isLegal(x.state, { type: 'run', node: 'nowhere' })).toBe(false);
+        },
+      });
+    }
+  });
+});
