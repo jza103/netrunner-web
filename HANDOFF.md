@@ -37,11 +37,47 @@ Play at least three full games as each side on a phone. Things to look at:
 - Are run decisions clear? The run panel shows the ICE, its subroutines and breaker strengths; the buttons are in the action bar.
 - Does the log read well from both sides?
 
-### 3. Bot quality
-`npx vite-node scripts/sim.ts 500` shows wins by reason. Known weaknesses:
-- **Corp bot** always activates ICE when approached (except over a Decoy Lab or an empty site) and does not hold credits back for it. It never bluffs by leaving a real project undeveloped.
-- **Ghost bot** treats every facedown ICE as a worst-case hunter, so it is cautious with a small hand. It does not use Salvage for gear, never scraps programs, and does not count the Corp's cycles to predict a score.
-- Neither bot has difficulty levels. A simple "easy" level could skip the lethal Burn Notice check and the face-check maths.
+### 3. Bot quality (done, Nov 2026)
+
+**Method.** Each change was measured by playing it against a frozen copy of the previous bot on the same seeds, 300 to 800 games at a time. Single runs of 200 games vary by about ±3 points, and different seed sets by more, so small changes need large samples.
+
+**Ghost:**
+- Run planning models facedown ICE and site cards from the Corp pool it has not seen, instead of assuming the worst.
+- Central and site runs are valued by the chance of a project.
+- It saves up for or digs to missing breakers.
+- It keeps a bank of 10 credits before low-value runs. This was the biggest win.
+- It keeps its hand out of Burn Notice range. Burn Notice had caused most flatlines.
+
+**Corp:**
+- Keeps a reserve to activate the ICE guarding projects.
+- Wants 3 ICE on a site with a project.
+
+**Decks** trimmed to 50 Corp cards (22 points) and 45 Ghost cards; every design keeps at least one copy.
+
+**Results:**
+- Hard vs Hard, bot-vs-bot: the Ghost wins 56% to 58% (`scripts/sim.ts 500 hard`: 281 of 500). Before this work the Corp won 62% to 68%.
+- The Hard Ghost beat the old Ghost's results by about 15 points against the same Corp.
+
+**Levels.** `LEVELS` in `src/bots/bot.ts`; Normal is the default, set on the start screen.
+
+| Hard bot plays | vs Easy | vs Normal | vs Hard |
+|---|---|---|---|
+| Ghost, wins | 73% | 59% | 58% |
+| Corp, wins | 71% | 53% | 42% |
+
+**Things tried that did not help:**
+- a bigger Corp bank;
+- 2 ICE on empty sites before a project goes in;
+- a second central ICE earlier;
+- requiring 2 ICE before installing a project, which stalls the Corp completely;
+- a run-value bar of 4 or 8 instead of 6.
+
+**Still open:**
+- Normal and Hard Corp are close; a Normal Corp could get more careless turns.
+- Hard vs Hard now leans Ghost. Whether to rebalance should wait for real games against Jason (task 2), since a human plays the Corp differently from the bot.
+- The Corp still never bluffs by leaving a real project undeveloped.
+- The Ghost does not count the Corp's cycles for a project installed and scored in one turn. About a third of scores are like that; only central pressure stops them.
+- The Ghost rarely hosts programs, and never scraps programs to free RAM.
 
 ### 4. Hardening
 - The soak test takes about 30 seconds, mostly `structuredClone` of a growing event list. If it gets in the way, cap `events` or move the log out of the cloned state.

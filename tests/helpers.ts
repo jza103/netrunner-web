@@ -1,7 +1,7 @@
 // Test helpers: build exact table positions by moving real card instances between zones.
 import { expect } from 'vitest';
 import { apply } from '../src/engine/actions';
-import { defId } from '../src/engine/cards';
+import { defaultDeck, defId } from '../src/engine/cards';
 import { violations } from '../src/engine/invariants';
 import { legalActions } from '../src/engine/legal';
 import { newGame, nodeOf } from '../src/engine/state';
@@ -36,7 +36,7 @@ export function rejects(s: GameState, a: Action): string {
 }
 
 /**
- * The built-in decks with identities that do nothing, so each test sees only the cards it sets up.
+ * The built-in cards (at least 3 of each) with identities that do nothing, so each test sees only the cards it sets up.
  * Tests of the real identities pass them to newGame themselves.
  */
 const plain = loadPack({
@@ -45,6 +45,11 @@ const plain = loadPack({
     { id: 'plain-corp', name: 'Plain Corp', side: 'corp', type: 'identity', copies: 1, text: 'Identity. No ability.' },
     { id: 'plain-ghost', name: 'Plain Ghost', side: 'ghost', type: 'identity', copies: 1, link: 0, text: 'Identity. Link 0. No ability.' },
   ],
+  // at least 3 of every built-in card, so a test can always pull the copies it needs
+  decks: {
+    corp: Object.fromEntries(Object.entries(defaultDeck('corp')).map(([id, n]) => [id, Math.max(n, 3)])),
+    ghost: Object.fromEntries(Object.entries(defaultDeck('ghost')).map(([id, n]) => [id, Math.max(n, 3)])),
+  },
 });
 if (!plain.ok) throw new Error(plain.errors.join('; '));
 export const PLAIN: GameSetup = plain.setup;

@@ -21,7 +21,7 @@ Why: the assistant that built this does not recreate a specific existing game (i
 **In v1**
 
 - Full rules of Breachline (see `reference/RULES.md`): turns, cycles, credits, installing, ICE, upgrades, runs with approach / encounter / break / jack out / reaching the node / access, Corp activation during runs, net, meat and core damage, heat, scoring and stealing, all win conditions
-- 4 identities (2 per side) and 57 card designs (112 cards: a 61-card Corp deck and a 51-card Ghost deck), plus an in-app deck builder
+- 4 identities (2 per side) and 57 card designs (95 cards: a 50-card Corp deck with 22 project points and a 45-card Ghost deck), plus an in-app deck builder
 - Traces and link, bad publicity, recurring credits, viruses and purging, bypass, hosting
 - Custom card packs: Jason's own cards as JSON, checked by the engine and played by the same rules code (`reference/CARD_PACKS.md`)
 - A rule-based bot for each side
@@ -33,7 +33,7 @@ Why: the assistant that built this does not recreate a specific existing game (i
 
 - Factions and influence, deck-building rules beyond size limits
 - Human-vs-human play, accounts, a backend
-- Bot difficulty levels or personalities
+- Bot personalities
 
 ## Architecture
 
@@ -69,10 +69,26 @@ Pure TypeScript in `src/engine`, no DOM, no mutation of its input, all randomnes
 
 ## Bots
 
-`src/bots/bot.ts`: `chooseAction(view)` for whichever side must act. Heuristic priority lists, no randomness, no hidden information.
+`src/bots/bot.ts`: `chooseAction(view, level)` for whichever side must act. Heuristic priority lists using only the bot's view; no AI and no hidden information. The only "randomness" is a hash of the view, so games replay exactly.
 
-- **Corp:** score when able, finish projects in one turn when the cycles allow, ICE the central nodes then a scoring site, burst economy, punish heat (Burn Notice, Asset Freeze), bait with Decoy Lab.
-- **Ghost:** shed heat, build economy, one breaker per ICE type, estimate the cost and risk of each run from what it can see, never face-check with too few cards in hand, jack out when the rest of the path is unaffordable.
+- **Corp:**
+  - Scores when able, and finishes projects in one turn when the cycles allow.
+  - ICEs the central nodes, then a scoring site (3 ICE once a project is in it).
+  - Keeps enough credits back to activate the ICE guarding its projects.
+  - Burst economy; activates assets and upgrades mid-run; bids on traces just past what the Ghost can match; purges when viruses add up.
+  - Punishes heat (Burn Notice, Asset Freeze) and baits with Decoy Lab.
+- **Ghost:**
+  - Models facedown cards as the Corp's pool minus what it has seen, limited to what the Corp can afford. From that it plans each run: chance of getting through, expected cost, and the chance of being flatlined (including traps).
+  - Values Command and the Mainframe by the chance of hitting an unseen project, and sites by the chance their card is a project, with counters raising urgency.
+  - Builds one breaker per ICE type, saving up for or digging to a missing one.
+  - Keeps a bank of credits before low-value runs.
+  - Keeps its hand out of reach of the Corp's damage directives, and sheds heat.
+- **Levels** (`LEVELS` in `bot.ts`): Easy, Normal and Hard. They differ in:
+  - the flatline risk the Ghost accepts;
+  - whether it watches for punishment;
+  - the Ghost's bank;
+  - whether the Corp keeps a reserve, punishes heat and bids on traces;
+  - a share of careless turns.
 
 Test: 500 seeded bot-vs-bot games must end with a winner, no invariant violations and no illegal bot choices.
 

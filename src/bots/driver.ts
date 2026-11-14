@@ -4,7 +4,7 @@ import { isLegal, legalActions } from '../engine/legal';
 import { actor, newGame } from '../engine/state';
 import { viewFor } from '../engine/view';
 import type { Action, GameSetup, GameState, Side } from '../engine/types';
-import { chooseAction } from './bot';
+import { type BotLevel, chooseAction } from './bot';
 
 export interface StepResult {
   state: GameState;
@@ -16,13 +16,13 @@ export interface StepResult {
 
 const SAFE: Action['type'][] = ['endTurn', 'proceed', 'jackOut', 'leave', 'steal', 'decline', 'keep', 'credit'];
 
-export function botStep(s: GameState, isBot: (side: Side) => boolean = () => true): StepResult | null {
+export function botStep(s: GameState, isBot: (side: Side) => boolean = () => true, level: BotLevel = 'hard'): StepResult | null {
   const who = actor(s);
   if (!who || !isBot(who)) return null;
   let action: Action | undefined;
   let fallback = false;
   try {
-    action = chooseAction(viewFor(s, who));
+    action = chooseAction(viewFor(s, who), level);
   } catch {
     action = undefined;
   }
@@ -38,6 +38,8 @@ export function botStep(s: GameState, isBot: (side: Side) => boolean = () => tru
 
 export interface SimOptions {
   seed: number | string;
+  /** bot strength for both seats */
+  level?: BotLevel;
   /** custom cards; the built-in set when left out */
   setup?: GameSetup;
   maxSteps?: number;
@@ -51,7 +53,7 @@ export function simulate(opts: SimOptions): { state: GameState; steps: number; f
   let fallbacks = 0;
   const max = opts.maxSteps ?? 20000;
   while (s.phase !== 'gameOver' && steps < max) {
-    const r = botStep(s)!;
+    const r = botStep(s, () => true, opts.level)!;
     s = r.state;
     steps++;
     if (r.fallback) fallbacks++;

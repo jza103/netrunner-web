@@ -5,7 +5,7 @@ A single-player cyber-heist card game in the browser. You play the **Ghost** (a 
 Breachline is an original game with its own cards and rules. It is in the same genre as asymmetric hacking card games, but it is not a port of any of them. `SPEC.md` explains that decision.
 
 - Rules: `reference/RULES.md` (also in the app under 📖)
-- Cards: `data/cards.json` (4 identities and 57 designs; 61-card Corp deck, 51-card Ghost deck; decks can be edited in the app)
+- Cards: `data/cards.json` (4 identities and 57 designs; 50-card Corp deck, 45-card Ghost deck; decks can be edited in the app)
 - Your own cards: load a card pack from the start screen; the format is in `reference/CARD_PACKS.md`, with a sample in `packs/sample-pack.json`
 - Decisions and scope: `SPEC.md`
 - What is left: `HANDOFF.md`
@@ -72,7 +72,7 @@ src/engine/
 - **Card packs** travel inside the state (`state.setup`): the custom card definitions and both deck lists. Custom ids are namespaced by a hash of the card's content (`x1a2b3c4d-my-card`), so `ensureCards(state)` can add them to the lookup without making `apply` depend on anything but its input. The other side's deck list is removed from each side's view.
 - The UI draws only from `viewFor(state, human)`, and the bot is only ever handed `viewFor(state, botSide)`.
 
-Debugging: `npx vite-node scripts/debug-seed.ts SEED` prints a full bot-vs-bot game; `npx vite-node scripts/sim.ts 500` prints win statistics.
+Debugging: `npx vite-node scripts/debug-seed.ts SEED` prints a full bot-vs-bot game; `npx vite-node scripts/sim.ts 500 [easy|normal|hard]` prints win statistics. The bot plays at Easy, Normal or Hard (start screen; Normal by default).
 
 ## Rulings and interpretations
 
@@ -118,5 +118,5 @@ Where the rules or a card could be read two ways, this is what the engine does.
 ## Status
 
 - Engine, 4 identities and 57 card designs, upgrades, three damage kinds, Corp activation during runs, traces and link, bad publicity, recurring credits, viruses and purging, bypass, hosting, an in-app deck builder, custom card packs, both bots, UI with save/resume, the Operator, Docker and the Pages workflow are done.
-- 153 tests pass: every rule, one test block per card (with a check that no card is untested), hidden-information and Operator-leak tests, card pack checks and 40 bot games with the sample pack, random-play fuzzing, and 500 seeded bot-vs-bot games with invariant checks after every action.
+- 156 tests pass: every rule, one test block per card (with a check that no card is untested), hidden-information and Operator-leak tests, card pack checks and 40 bot games with the sample pack, random-play fuzzing, and 500 seeded bot-vs-bot games with invariant checks after every action.
 - Not verified here: a live Operator call (no API key in the build environment) and the GitHub Pages deploy (it needs Pages switched on in the repo settings).

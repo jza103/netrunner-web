@@ -46,3 +46,28 @@ describe('legalActions and apply agree', () => {
     }
   });
 });
+
+describe('bot levels', () => {
+  it.each(['easy', 'normal'] as const)('%s bots finish 60 games with no illegal state or fallback', (level) => {
+    let fallbacks = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      const r = simulate({
+        seed: `${level}-${seed}`,
+        level,
+        maxSteps: 6000,
+        onStep: (x) => {
+          const v = violations(x.state);
+          if (v.length) throw new Error(`seed ${seed}: ${v.join('; ')}`);
+        },
+      });
+      expect(r.state.phase).toBe('gameOver');
+      fallbacks += r.fallbacks;
+    }
+    expect(fallbacks).toBe(0);
+  });
+  it('the same view and level always give the same choice', () => {
+    const r = simulate({ seed: 'repeat', level: 'easy', maxSteps: 300 });
+    const again = simulate({ seed: 'repeat', level: 'easy', maxSteps: 300 });
+    expect(again.state).toEqual(r.state);
+  });
+});

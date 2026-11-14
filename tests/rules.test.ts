@@ -20,10 +20,10 @@ describe('card data', () => {
       expect(['corp', 'ghost']).toContain(c.side);
     }
   });
-  it('decks: 61 Corp cards with 25 project points, 51 Ghost cards', () => {
-    expect(deckList('corp')).toHaveLength(61);
-    expect(deckList('ghost')).toHaveLength(51);
-    expect(deckList('corp').reduce((n, c) => n + (cardOf(c).points ?? 0), 0)).toBe(25);
+  it('decks: 50 Corp cards with 22 project points, 45 Ghost cards', () => {
+    expect(deckList('corp')).toHaveLength(50);
+    expect(deckList('ghost')).toHaveLength(45);
+    expect(deckList('corp').reduce((n, c) => n + (cardOf(c).points ?? 0), 0)).toBe(22);
   });
 });
 

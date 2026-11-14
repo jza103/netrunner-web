@@ -1,5 +1,6 @@
 // Save and resume in the browser. Every read and write is guarded: storage can be unavailable.
 import { ensureCards } from '../engine/cards';
+import type { BotLevel } from '../bots/bot';
 import type { GameSetup, GameState } from '../engine/types';
 
 const KEY = 'breachline:save:v2'; // v2: upgrades, damage kinds, card packs
@@ -8,10 +9,12 @@ const PACK = 'breachline:pack:v1';
 
 export interface Settings {
   speed: 'slow' | 'normal' | 'fast' | 'instant';
+  /** how well the bot plays */
+  level: BotLevel;
   sound: boolean;
 }
 
-export const DEFAULT_SETTINGS: Settings = { speed: 'normal', sound: true };
+export const DEFAULT_SETTINGS: Settings = { speed: 'normal', sound: true, level: 'normal' };
 
 export function loadGame(): GameState | null {
   try {

@@ -5,15 +5,48 @@ import { legalActions } from '../engine/legal';
 import { actor, available, breakerStrength, canBreak, currentIce, iceStrength, isSite, link, nodeOf, ramLimit, ramUsed, rigSum } from '../engine/state';
 import type { Action, CardDef, CardId, GameState, NodeId, NodeState, Side } from '../engine/types';
 
+/** How hard the bot plays. Hard is the full bot; lower levels drop some of its care. */
+export type BotLevel = 'easy' | 'normal' | 'hard';
+
+interface Style {
+  /** the chance of being flatlined the Ghost accepts on a run */
+  lethalOk: number;
+  /** the Ghost keeps its hand out of reach of the Corp's damage directives */
+  watchPunishment: boolean;
+  /** the Corp keeps credits back to switch on the ICE guarding its projects */
+  reserve: boolean;
+  /** the Corp plays damage and credit-loss directives */
+  punish: boolean;
+  /** the Corp outbids the Ghost on traces */
+  traceBid: boolean;
+  /** share of ordinary turn decisions where the bot plays carelessly (Corp: takes a credit; Ghost: runs somewhere) */
+  slack: number;
+  /** credits the Ghost keeps before making low-value runs */
+  bank: number;
+}
+
+export const LEVELS: Record<BotLevel, Style> = {
+  easy: { lethalOk: 0.2, watchPunishment: false, reserve: false, punish: false, traceBid: false, slack: 0.3, bank: 0 },
+  normal: { lethalOk: 0.08, watchPunishment: true, reserve: true, punish: true, traceBid: true, slack: 0.1, bank: 6 },
+  hard: { lethalOk: 0.04, watchPunishment: true, reserve: true, punish: true, traceBid: true, slack: 0, bank: 10 },
+};
+
+/** Set at the start of each chooseAction call; the bot is synchronous, so this is never shared between calls. */
+let style: Style = LEVELS.hard;
+
+/** A stable number in [0, 1) from what the bot can see, so lazy moves replay exactly. */
+function noise(v: GameState): number {
+  let h = (v.seq * 2654435761) ^ (v.turnNumber * 40503) ^ (v.corp.credits * 97 + v.ghost.credits * 31);
+  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d) >>> 0;
+  return h / 4294967296;
+}
+
 type Of<T extends Action['type']> = Extract<Action, { type: T }>;
 
 function pick<T extends Action['type']>(legal: Action[], type: T, pred: (a: Of<T>) => boolean = () => true): Of<T> | undefined {
   return legal.find((a): a is Of<T> => a.type === type && pred(a as Of<T>));
 }
 
-function totalDamage(d: CardDef): number {
-  return (d.subs ?? []).reduce((n, s) => n + (s.op === 'damage' ? s.n : 0), 0);
-}
 
 // ---------------------------------------------------------------------------
 // Corp
@@ -33,12 +66,27 @@ function wantedIce(v: GameState, n: NodeState): number {
   if (n.id === 'dump') return v.corp.discard.some((c) => cardOf(c).type === 'project') ? 1 : 0;
   if (!n.root) return 1;
   const d = cardOf(n.root.card);
-  if (d.type === 'project') return 2;
+  if (d.type === 'project') return 3;
   return d.trap ? 1 : 0;
+}
+
+/** Credits the Corp keeps back to switch on the inactive ICE guarding its projects during the Ghost's turn. */
+function iceReserve(v: GameState): number {
+  let most = 0;
+  for (const n of v.corp.nodes) {
+    const guarded = n.root ? cardOf(n.root.card).type === 'project' : n.id === 'command' || n.id === 'mainframe';
+    if (!guarded) continue;
+    const need = n.ice.filter((i) => !i.active).reduce((a, i) => a + (cardOf(i.card).cost ?? 0), 0);
+    most = Math.max(most, n.root ? need : Math.min(need, 3));
+  }
+  return Math.min(most, 8);
 }
 
 function corpTurn(v: GameState, legal: Action[]): Action {
   const c = v.corp;
+  const reserve = style.reserve ? iceReserve(v) : 0;
+  /** Can the Corp spend this much and still switch its ICE on later? */
+  const spare = (n: number) => c.credits - n >= reserve;
   const g = v.ghost;
   const sites = c.nodes.filter((n) => isSite(n.id));
   const inHand = (def: string) => c.hand.find((x) => is(x, def));
@@ -57,7 +105,7 @@ function corpTurn(v: GameState, legal: Action[]): Action {
 
   // lethal or heavy Burn Notice
   const rigs = Math.max(0, rigSum(v, (d) => d.prevent?.meat) - v.flags.prevented.meat);
-  const burn = pick(legal, 'play', (a) => is(a.card, 'burn-notice'));
+  const burn = style.punish ? pick(legal, 'play', (a) => is(a.card, 'burn-notice')) : undefined;
   if (burn && 1 + g.heat - rigs > g.hand.length) return burn;
 
   // finish a project this turn if the cycles and credits are there
@@ -74,7 +122,7 @@ function corpTurn(v: GameState, legal: Action[]): Action {
 
   if (burn && 1 + g.heat - rigs >= 2) return burn;
   const freeze = pick(legal, 'play', (a) => is(a.card, 'asset-freeze'));
-  if (freeze && g.credits >= 3) return freeze;
+  if (freeze && style.punish && g.credits >= 3) return freeze;
   const audit = pick(legal, 'play', (a) => is(a.card, 'lockdown-audit'));
   if (audit && c.cycles >= 2 && ((inHand('burn-notice') && c.credits >= 5) || (inHand('asset-freeze') && c.credits >= 3 && g.credits >= 3))) return audit;
 
@@ -91,7 +139,7 @@ function corpTurn(v: GameState, legal: Action[]): Action {
   if (ice.length) {
     const needs = c.nodes
       .map((n) => ({ n, lack: wantedIce(v, n) - n.ice.length }))
-      .filter((x) => x.lack > 0 && c.credits >= x.n.ice.length)
+      .filter((x) => x.lack > 0 && (spare(x.n.ice.length) || x.n.ice.length === 0))
       .sort((a, b) => b.lack - a.lack || a.n.ice.length - b.n.ice.length);
     // keep enough credits to switch the ICE on later
     const card = [...ice].sort((a, b) => (cardOf(a).cost ?? 0) - (cardOf(b).cost ?? 0))[needs[0]?.n.ice.length ? ice.length - 1 : 0];
@@ -119,7 +167,7 @@ function corpTurn(v: GameState, legal: Action[]): Action {
   for (const n of sites) {
     if (!n.root || cardOf(n.root.card).type !== 'project') continue;
     const dev = pick(legal, 'develop', (a) => a.card === n.root!.card);
-    if (dev && n.root.dev < cardOf(n.root.card).dev! && c.credits >= 2) return dev;
+    if (dev && n.root.dev < cardOf(n.root.card).dev! && spare(1)) return dev;
   }
 
   // assets: Shell Company on its own, Decoy Lab somewhere it looks like a project
@@ -134,7 +182,7 @@ function corpTurn(v: GameState, legal: Action[]): Action {
     if (a) return a;
   }
   for (const n of sites) {
-    if (n.root && is(n.root.card, 'decoy-lab') && n.root.dev < 2 && c.credits >= 6) {
+    if (n.root && is(n.root.card, 'decoy-lab') && n.root.dev < 2 && spare(4)) {
       const dev = pick(legal, 'develop', (a) => a.card === n.root!.card);
       if (dev) return dev;
     }
@@ -163,16 +211,16 @@ function corpTurn(v: GameState, legal: Action[]): Action {
   const cleanup = pick(legal, 'play', (a) => !!cardOf(a.card).onPlay?.some((e) => e.op === 'clearBadPublicity'));
   if (cleanup && c.badPublicity > 0 && c.credits >= 5) return cleanup;
   const traced = pick(legal, 'play', (a) => !!cardOf(a.card).onPlay?.some((e) => e.op === 'trace'));
-  if (traced && c.credits - (cardOf(traced.card).cost ?? 0) >= 3) return traced;
+  if (traced && spare((cardOf(traced.card).cost ?? 0) + 3)) return traced;
 
   const hunt = pick(legal, 'trashContact');
-  if (hunt && c.credits >= 6) return hunt;
+  if (hunt && spare(4)) return hunt;
   const recall = pick(legal, 'play', (a) => is(a.card, 'recall'));
   if (recall && c.deck.length <= 6 && c.discard.length >= 5) return recall;
 
   const draw = pick(legal, 'draw');
   if (draw && c.hand.length <= 2 && c.deck.length > 4) return draw;
-  if (c.credits < 7) return pick(legal, 'credit')!;
+  if (c.credits < 7 || !spare(2)) return pick(legal, 'credit')!;
   if (draw && c.hand.length < 5 && c.deck.length > 4) return draw;
   return pick(legal, 'credit')!;
 }
@@ -233,53 +281,160 @@ function breakPlan(v: GameState, ice: CardId, n: number): { card: CardId; cost: 
   return best;
 }
 
-/** Worst damage a facedown ICE could do, given what the Corp can afford to switch on. */
-function faceCheckDamage(v: GameState): number {
-  return Math.max(0, ...[...CARDS, ...v.setup.cards].filter((d) => d.type === 'ice' && d.side === 'corp' && (d.cost ?? 0) <= v.corp.credits).map(totalDamage));
+// ---------------------------------------------------------------------------
+// Ghost run planning: what facedown cards probably are, and what a run probably costs
+// ---------------------------------------------------------------------------
+
+/** Corp cards of a type the Ghost has not seen yet, weighted by printed copies (the Corp deck list is hidden). */
+function unseenPool(v: GameState, types: string[]): { def: CardDef; w: number }[] {
+  const replaced = new Set(v.setup.cards.map((c) => c.id.replace(/^x[0-9a-f]{8}-/, '')));
+  const pool = [...CARDS.filter((c) => !replaced.has(c.id)), ...v.setup.cards].filter((d) => d.side === 'corp' && types.includes(d.type));
+  const seen: Record<string, number> = {};
+  const note = (c: CardId) => {
+    if (!isHidden(c)) seen[cardOf(c).id] = (seen[cardOf(c).id] ?? 0) + 1;
+  };
+  for (const n of v.corp.nodes) for (const i of [...n.ice, ...n.upgrades, ...(n.root ? [n.root] : [])]) note(i.card);
+  [...v.corp.discard, ...v.corp.scored, ...v.ghost.scored].forEach(note);
+  return pool.map((def) => ({ def, w: Math.max(0, def.copies - (seen[def.id] ?? 0)) })).filter((x) => x.w > 0);
 }
 
-interface Path {
+/** Damage taken, as a probability distribution. */
+type Dist = Map<number, number>;
+function addTo(d: Dist, k: number, p: number) {
+  if (p > 0) d.set(k, (d.get(k) ?? 0) + p);
+}
+
+interface Plan {
+  /** chance the run gets past every ICE */
+  through: number;
+  /** expected credits spent breaking */
   cost: number;
-  unknown: number;
-  blocked: boolean;
-  damage: number;
+  /** damage taken on the way, over every outcome */
+  damage: Dist;
 }
 
-function pathCost(v: GameState, nodeId: NodeId, fromPos: number, noActivate = false, bypass = 0): Path {
+/** One ICE: what happens if the Ghost meets it, given the credits it has left. */
+function meet(v: GameState, def: CardDef, iceId: CardId | null, budget: number): { through: boolean; cost: number; damage: number } {
+  const subs = def.subs ?? [];
+  const must = subs.map((s, i) => (s.op === 'endRun' || s.op === 'damage' || (s.op === 'trashProgram' && v.ghost.programs.length > 0) ? i : -1)).filter((i) => i >= 0);
+  let best: number | null = null;
+  for (const card of v.ghost.programs) {
+    const b = cardOf(card).breaker;
+    if (!b || (b.breaks !== 'any' && b.breaks !== def.subtype)) continue;
+    const strength = iceId ? iceStrength(v, iceId) : (def.strength ?? 0);
+    const need = Math.max(0, strength - breakerStrength(v, card));
+    const cost = Math.ceil(need / b.boostBy) * b.boostCost + must.length * b.breakCost;
+    if (best === null || cost < best) best = cost;
+  }
+  if (best !== null && best <= budget) return { through: true, cost: best, damage: 0 };
+  // cannot break it all: the subroutines fire in order until one ends the run
+  let damage = 0;
+  for (const s of subs) {
+    if (s.op === 'endRun') return { through: false, cost: 0, damage };
+    if (s.op === 'damage') damage += s.n + (s.perHeat ?? 0) * v.ghost.heat;
+  }
+  return { through: true, cost: 0, damage };
+}
+
+function plan(v: GameState, nodeId: NodeId, fromPos: number, opts: { noActivate?: boolean; bypass?: number; budget: number }): Plan {
   const node = nodeOf(v, nodeId);
-  const p: Path = { cost: 0, unknown: 0, blocked: false, damage: 0 };
+  // states still running: [probability, damage so far, credits left]
+  let alive: [number, number, number][] = [[1, 0, opts.budget]];
+  const damage: Dist = new Map();
+  let cost = 0;
+  let bypass = opts.bypass ?? 0;
+  const iceGuess = unseenPool(v, ['ice']);
   for (let pos = fromPos; pos >= 0; pos--) {
     const inst = node.ice[pos];
-    if (!inst.active && noActivate) continue;
-    if (bypass > 0) {
-      bypass--;
-      continue;
-    }
+    if (!inst.active && opts.noActivate) continue;
+    // candidates for what this ICE is: [probability, def]
+    let cands: [number, CardDef][];
     if (isHidden(inst.card)) {
-      if (v.corp.credits >= 1) p.unknown++;
-      continue;
+      const total = iceGuess.reduce((a, x) => a + x.w, 0) || 1;
+      cands = iceGuess.map((x) => [x.w / total, x.def]);
+    } else cands = [[1, cardOf(inst.card)]];
+    const next: [number, number, number][] = [];
+    for (const [p, dmg, left] of alive) {
+      for (const [q, def] of cands) {
+        const pq = p * q;
+        // inactive ICE the Corp cannot afford is passed; affordable ICE is assumed switched on
+        if (!inst.active && v.corp.credits < (def.cost ?? 0)) {
+          next.push([pq, dmg, left]);
+          continue;
+        }
+        if (bypass > 0) {
+          next.push([pq, dmg, left]);
+          continue;
+        }
+        const r = meet(v, def, isHidden(inst.card) ? null : inst.card, left);
+        cost += pq * r.cost;
+        if (r.through) next.push([pq, dmg + r.damage, left - r.cost]);
+        else addTo(damage, dmg + r.damage, pq);
+      }
     }
-    const d = cardOf(inst.card);
-    if (!inst.active && v.corp.credits < (d.cost ?? 0)) continue;
-    const must = mustBreak(v, inst.card);
-    const plan = breakPlan(v, inst.card, must.length);
-    if (plan) p.cost += plan.cost;
-    else if (d.subs!.some((s) => s.op === 'endRun')) p.blocked = true;
-    else p.damage += totalDamage(d);
+    if (bypass > 0 && (inst.active || !opts.noActivate)) bypass--;
+    // merge identical states to keep this small
+    const merged = new Map<string, [number, number, number]>();
+    for (const [p, d, l] of next) {
+      const k = `${d}:${l}`;
+      const m = merged.get(k);
+      if (m) m[0] += p;
+      else merged.set(k, [p, d, l]);
+    }
+    alive = [...merged.values()];
   }
-  // active upgrades that charge a toll at the node
-  for (const u of node.upgrades) {
-    if (!u.active) continue;
-    for (const e of cardOf(u.card).onApproachNode ?? []) if (e.op === 'payOrEndRun') p.cost += e.n;
+  // tolls at the node
+  let toll = 0;
+  for (const u of node.upgrades) if (u.active) for (const e of cardOf(u.card).onApproachNode ?? []) if (e.op === 'payOrEndRun') toll += e.n;
+  let through = 0;
+  for (const [p, d, left] of alive) {
+    if (left < toll) addTo(damage, d, p);
+    else {
+      through += p;
+      addTo(damage, d, p);
+    }
   }
+  return { through, cost: cost + through * toll, damage };
+}
+
+/** Chance that this much damage, or more, flatlines the Ghost. */
+function lethal(v: GameState, d: Dist, extra = 0): number {
+  let p = 0;
+  for (const [k, q] of d) if (k + extra > v.ghost.hand.length) p += q;
   return p;
 }
 
-/** Damage the card inside a site might do if it is a trap. */
-function trapRisk(v: GameState, node: NodeState): number {
-  if (!node.root) return 0;
-  if (isHidden(node.root.card)) return 2 + node.root.dev;
-  return cardOf(node.root.card).trap ? 99 : 0;
+function expected(d: Dist): number {
+  let e = 0;
+  for (const [k, q] of d) e += k * q;
+  return e;
+}
+
+/** What a facedown card in a site might be: chance it is a project, a trap, and the trap's damage. */
+function rootGuess(v: GameState, node: NodeState): { project: number; trap: number; trapDamage: number } {
+  const root = node.root!;
+  if (!isHidden(root.card)) {
+    const d = cardOf(root.card);
+    return { project: d.type === 'project' ? 1 : 0, trap: d.trap ? 1 : 0, trapDamage: d.trap ? trapDamage(d, root.dev) : 0 };
+  }
+  // counters only go on projects and developable assets
+  const pool = unseenPool(v, ['project', 'asset']).filter((x) => root.dev === 0 || x.def.type === 'project' || x.def.developable);
+  const total = pool.reduce((a, x) => a + x.w, 0) || 1;
+  let project = 0;
+  let trap = 0;
+  let trapDmg = 0;
+  for (const x of pool) {
+    if (x.def.type === 'project') project += x.w / total;
+    if (x.def.trap) {
+      trap += x.w / total;
+      trapDmg = Math.max(trapDmg, trapDamage(x.def, root.dev));
+    }
+  }
+  return { project, trap, trapDamage: trapDmg };
+}
+
+function trapDamage(d: CardDef, dev: number): number {
+  return (d.onAccess ?? []).reduce((a, e) => a + (e.op === 'damage' ? e.n + (e.perDev ?? 0) * dev : 0), 0);
 }
 
 function runsThisTurn(v: GameState, name: string): number {
@@ -290,29 +445,79 @@ function runsThisTurn(v: GameState, name: string): number {
 
 function nodeValue(v: GameState, n: NodeState): number {
   const g = v.ghost;
-  if (n.id === 'mainframe') return runsThisTurn(v, 'Mainframe') ? 0 : 5 + 2 * rigSum(v, (d) => d.mainframeAccess);
-  if (n.id === 'command') return runsThisTurn(v, 'Command') >= 2 || !v.corp.hand.length ? 0 : 4 + (v.corp.hand.length >= 4 ? 1 : 0);
+  // the chance a card the Ghost has not seen is a project, and what a project is worth
+  const all = unseenPool(v, ['project', 'ice', 'asset', 'upgrade', 'directive']);
+  const total = all.reduce((a, x) => a + x.w, 0) || 1;
+  const pProject = all.filter((x) => x.def.type === 'project').reduce((a, x) => a + x.w, 0) / total;
+  const steal = 16;
+  if (n.id === 'mainframe') {
+    if (runsThisTurn(v, 'Mainframe')) return 0;
+    const viral = g.programs.reduce((k, p) => k + (cardOf(p).virusAccess ? Math.floor(((g.virus[p] ?? 0) + 1) / cardOf(p).virusAccess!) : 0), 0);
+    const cards = 1 + rigSum(v, (d) => d.mainframeAccess) + viral;
+    return 1 + cards * pProject * steal;
+  }
+  if (n.id === 'command') {
+    if (runsThisTurn(v, 'Command') >= 2 || !v.corp.hand.length) return 0;
+    // the Corp holds projects it has no safe place for: a full hand is richer
+    return 1 + pProject * steal * (v.corp.hand.length >= 5 ? 1.3 : 1);
+  }
   if (n.id === 'dump') {
     const unseen = v.corp.discard.filter(isHidden).length;
     return unseen >= 3 ? 2 + unseen : 0;
   }
-  if (!n.root) return 0;
-  if (isHidden(n.root.card)) return 8 + 3 * n.root.dev;
-  const d = cardOf(n.root.card);
-  if (d.type === 'project') return 20;
-  if (d.trap) return 0;
-  return g.credits >= (d.trash ?? 0) + 4 ? 3 : 0;
+  if (!n.root) return n.upgrades.some((u) => isHidden(u.card) || !cardOf(u.card).trap) ? 1 : 0;
+  const guess = rootGuess(v, n);
+  // a project with counters on it is close to being scored: stealing it now matters more
+  const project = guess.project * (14 + 3 * n.root.dev);
+  const d = isHidden(n.root.card) ? null : cardOf(n.root.card);
+  const asset = d && d.type === 'asset' && !d.trap && g.credits >= (d.trash ?? 0) + 4 ? 3 : 0;
+  return project + asset + (isHidden(n.root.card) ? 1 : 0);
 }
+
+/**
+ * The most meat or net damage the Corp could deal on its next turn with directives it has not
+ * shown yet, given heat now and credits it could have (its own plus about 2 more), minus prevention.
+ */
+function punishment(v: GameState): number {
+  const g = v.ghost;
+  const credits = v.corp.credits + 2;
+  const hits: number[] = [];
+  for (const { def, w } of unseenPool(v, ['directive'])) {
+    if (def.playIf === 'ghostHasHeat' && g.heat === 0) continue;
+    if (def.playIf === 'ghostRanLastTurn' && !v.flags.successfulRun) continue;
+    const dmg = (def.onPlay ?? []).reduce((a, e) => a + (e.op === 'damage' ? e.n + (e.perHeat ?? 0) * g.heat : 0), 0);
+    for (let k = 0; k < Math.min(w, 2); k++) if (dmg > 0) hits.push(dmg * 100 + (def.cost ?? 0));
+  }
+  // the Corp has 3 cycles; play the biggest ones it can pay for
+  hits.sort((a, b) => b - a);
+  let total = 0;
+  let left = credits;
+  let plays = 0;
+  for (const h of hits) {
+    const dmg = Math.floor(h / 100);
+    const cost = h % 100;
+    if (plays < 3 && cost <= left) {
+      total += dmg;
+      left -= cost;
+      plays++;
+    }
+  }
+  const prevent = rigSum(v, (d) => d.prevent?.meat);
+  return Math.max(0, total - prevent);
+}
+
+/** How much damage the Ghost bot will risk: the chance of being flatlined it accepts. */
 
 interface RunChoice {
   node: NodeId;
   score: number;
+  /** expected credits it costs */
+  cost: number;
   blackout: boolean;
   sideDoor?: boolean;
 }
 
 function bestRun(v: GameState, legal: Action[]): RunChoice | null {
-  const g = v.ghost;
   const hasBlackout = !!pick(legal, 'play', (a) => is(a.card, 'blackout'));
   const hasSideDoor = !!pick(legal, 'play', (a) => !!cardOf(a.card).onPlay?.some((e) => e.op === 'run' && !!e.bypass));
   const budget = available(v, 'ghost', 'break') + v.corp.badPublicity;
@@ -325,13 +530,17 @@ function bestRun(v: GameState, legal: Action[]): RunChoice | null {
     if (hasBlackout && n.ice.some((i) => !i.active)) options.push([true, false]);
     if (hasSideDoor && n.ice.length) options.push([false, true]);
     for (const [blackout, sideDoor] of options) {
-      const p = pathCost(v, n.id, n.ice.length - 1, blackout, sideDoor ? 1 : 0);
       const extra = blackout || sideDoor ? 2 : 0;
-      if (p.blocked || p.cost + extra + p.unknown > budget) continue;
-      const risk = p.damage + (p.unknown ? faceCheckDamage(v) : 0);
-      if (g.hand.length < risk + 1 || g.hand.length - risk < trapRisk(v, n)) continue;
-      const score = value - 0.5 * (p.cost + extra) - p.unknown;
-      if (!best || score > best.score) best = { node: n.id, score, blackout, sideDoor };
+      const p = plan(v, n.id, n.ice.length - 1, { noActivate: blackout, bypass: sideDoor ? 1 : 0, budget: budget - extra });
+      if (p.through < 0.25) continue;
+      const trap = n.root ? rootGuess(v, n) : { trap: 0, trapDamage: 0 };
+      const risk = lethal(v, p.damage) + p.through * trap.trap * lethal(v, p.damage, trap.trapDamage);
+      if (risk > style.lethalOk) continue;
+      const hurt = expected(p.damage) + p.through * trap.trap * trap.trapDamage;
+      // money is worth more to a poor Ghost
+      const weight = v.ghost.credits < 6 ? 1 : 0.5;
+      const score = p.through * value - weight * (p.cost + extra) - 1.5 * hurt - (1 - p.through) * 2;
+      if (!best || score > best.score) best = { node: n.id, score, cost: p.cost + extra, blackout, sideDoor };
     }
   }
   return best;
@@ -361,6 +570,14 @@ function ghostTurn(v: GameState, legal: Action[]): Action {
   if (g.cycles <= 0) return pick(legal, 'endTurn')!;
   const shed = pick(legal, 'shedHeat');
   if (shed) return shed;
+  // heat plus a thin hand is how the Corp kills: get out of reach of its punishment cards
+  if (style.watchPunishment && punishment(v) >= g.hand.length) {
+    const draw = pick(legal, 'draw');
+    if (draw && g.credits >= 2 && g.cycles <= 1 && g.heat > 0) return pick(legal, 'credit')!;
+    const cram = pick(legal, 'play', (a) => !!cardOf(a.card).onPlay?.every((e) => e.op === 'draw'));
+    if (cram) return cram;
+    if (draw) return draw;
+  }
 
   const money = play('fast-money');
   if (money) return money;
@@ -377,6 +594,15 @@ function ghostTurn(v: GameState, legal: Action[]): Action {
     .sort((a, b) => (cardOf(a.card).cost ?? 0) - (cardOf(b.card).cost ?? 0));
   if (breakers.length) return breakers[0];
 
+  // a breaker type is still missing: save up for the one in hand, or dig for one
+  const missing = (['wall', 'cipher', 'hunter'] as const).filter((t) => !covers(t));
+  const wanted = g.hand.filter((c) => {
+    const b = cardOf(c).breaker;
+    return b && (b.breaks === 'any' ? missing.length > 0 : missing.includes(b.breaks as 'wall'));
+  });
+  const saving = missing.length > 0 && wanted.length > 0;
+  const digging = missing.length > 0 && !wanted.length && g.deck.length > 0;
+
   const run = bestRun(v, legal);
   const go = (r: RunChoice): Action => {
     if (r.blackout) return pick(legal, 'play', (a) => is(a.card, 'blackout') && a.node === r.node)!;
@@ -386,6 +612,19 @@ function ghostTurn(v: GameState, legal: Action[]): Action {
     return pick(legal, 'run', (a) => a.node === r.node)!;
   };
   if (run && run.score >= 6) return go(run);
+  if (saving) {
+    const fast = pick(legal, 'play', (a) => !!cardOf(a.card).onPlay?.every((e) => e.op === 'gain'));
+    if (fast) return fast;
+    return pick(legal, 'credit')!;
+  }
+  if (digging && g.credits >= 5) {
+    const cram = pick(legal, 'play', (a) => !!cardOf(a.card).onPlay?.every((e) => e.op === 'draw'));
+    if (cram) return cram;
+    const house = pick(legal, 'use', (a) => !!cardOf(a.card).ability?.effects.every((e) => e.op === 'draw') && cardOf(a.card).ability!.cycles > 0);
+    if (house) return house;
+    const draw = pick(legal, 'draw');
+    if (draw) return draw;
+  }
 
   // look before leaping into a developed card
   const suspect = v.corp.nodes.find((n) => n.root && isHidden(n.root.card) && n.root.dev > 0);
@@ -420,7 +659,8 @@ function ghostTurn(v: GameState, legal: Action[]): Action {
   const safehouse = pick(legal, 'use', (a) => is(a.card, 'safehouse'));
   if (safehouse && g.hand.length <= 2) return safehouse;
 
-  if (run && run.score > 0) return go(run);
+  // low-value runs only with money in the bank: credits win more games than speculative runs
+  if (run && run.score > 0 && g.credits >= style.bank && (missing.length === 0 || g.credits - run.cost >= 3)) return go(run);
 
   const plain = pick(legal, 'play', (a) => {
     const fx = cardOf(a.card).onPlay ?? [];
@@ -478,10 +718,10 @@ function ghostRun(v: GameState, legal: Action[]): Action {
     return pick(legal, 'proceed')!;
   }
   if (run.step === 'passed') {
-    const p = pathCost(v, run.node, run.pos - 1, run.noActivate);
-    const risk = p.damage + (p.unknown ? faceCheckDamage(v) : 0);
-    const trap = run.instead ? 0 : trapRisk(v, node);
-    if (p.blocked || p.cost > available(v, 'ghost', 'break') || g.hand.length < risk || g.hand.length - risk < trap) return pick(legal, 'jackOut')!;
+    const p = plan(v, run.node, run.pos - 1, { noActivate: run.noActivate, bypass: run.bypass, budget: available(v, 'ghost', 'break') + run.bpCredits });
+    const trap = run.instead || !node.root ? { trap: 0, trapDamage: 0 } : rootGuess(v, node);
+    const risk = lethal(v, p.damage) + p.through * trap.trap * lethal(v, p.damage, trap.trapDamage);
+    if (p.through < 0.2 || risk > style.lethalOk) return pick(legal, 'jackOut')!;
     return pick(legal, 'continue')!;
   }
   // access
@@ -504,7 +744,7 @@ function traceChoice(v: GameState, side: Side, legal: Action[]): Action {
   if (side === 'corp') {
     // win it outright if the Ghost cannot match, without emptying the bank
     const target = link(v) + available(v, 'ghost', 'trace') + 1 - t.base;
-    const n = target <= 0 ? 0 : target <= Math.min(most, Math.max(0, v.corp.credits - 2), 6) ? target : 0;
+    const n = !style.traceBid ? Math.min(most, 1) : target <= 0 ? 0 : target <= Math.min(most, Math.max(0, v.corp.credits - 2), 6) ? target : 0;
     return { type: 'traceBoost', n };
   }
   // the Ghost is offered exactly up to what it takes to evade
@@ -513,9 +753,17 @@ function traceChoice(v: GameState, side: Side, legal: Action[]): Action {
 }
 
 /** Choose an action for whoever must act in this view. */
-export function chooseAction(v: GameState): Action {
+export function chooseAction(v: GameState, level: BotLevel = 'hard'): Action {
+  style = LEVELS[level];
   const side = actor(v) as Side;
   const legal = legalActions(v);
+  // lower levels sometimes waste a cycle on a credit instead of thinking
+  if (style.slack && v.phase === 'action' && !v.run && !v.trace && v[side].cycles > 0 && noise(v) < style.slack) {
+    const runs = legal.filter((a) => a.type === 'run');
+    if (side === 'ghost' && runs.length) return runs[Math.floor(noise({ ...v, seq: v.seq + 1 }) * runs.length)];
+    const credit = pick(legal, 'credit');
+    if (credit) return credit;
+  }
   if (v.trace) return traceChoice(v, side, legal);
   if (v.phase === 'mulligan') {
     const hand = v[side].hand.map(cardOf);

@@ -33,6 +33,8 @@ export function App() {
   if (screen === 'new' || !state)
     return (
       <NewGame
+        settings={settings}
+        setSettings={setSettings}
         canContinue={!!state && state.phase !== 'gameOver'}
         onContinue={() => setScreen('game')}
         gmSettings={gmSettings}
@@ -50,7 +52,7 @@ export function App() {
 // New game
 // ---------------------------------------------------------------------------
 
-function NewGame(props: { canContinue: boolean; onContinue: () => void; onStart: (s: GameState) => void; gmSettings: GmSettings; setGmSettings: (s: GmSettings) => void }) {
+function NewGame(props: { settings: Settings; setSettings: (s: Settings) => void; canContinue: boolean; onContinue: () => void; onStart: (s: GameState) => void; gmSettings: GmSettings; setGmSettings: (s: GmSettings) => void }) {
   const [side, setSide] = useState<Side>('ghost');
   const [help, setHelp] = useState(false);
   const gm = props.gmSettings.enabled;
@@ -130,6 +132,14 @@ function NewGame(props: { canContinue: boolean; onContinue: () => void; onStart:
             ))}
           </select>
         </label>
+        <label class="field">
+          <span>🤖 Bot difficulty</span>
+          <select value={props.settings.level} onChange={(e) => props.setSettings({ ...props.settings, level: (e.target as HTMLSelectElement).value as Settings['level'] })}>
+            <option value="easy">Easy: careless, takes big risks, never punishes heat</option>
+            <option value="normal">Normal: plays carefully, with some lazy turns</option>
+            <option value="hard">Hard: the full bot</option>
+          </select>
+        </label>
         <div class="row packrow">
           <span>
             🃏 Cards: <b>{pack?.packName ?? 'Breachline core set'}</b>{' '}
@@ -191,7 +201,7 @@ function Game(props: {
   useEffect(() => {
     if (!who || myMove) return;
     const t = setTimeout(() => {
-      const r = botStep(state, (side) => side !== me);
+      const r = botStep(state, (side) => side !== me, settings.level);
       if (r) setState(r.state);
     }, SPEED_MS[settings.speed]);
     return () => clearTimeout(t);
