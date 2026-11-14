@@ -15,6 +15,8 @@ All milestones in `SPEC.md` are built. `npm run typecheck` is clean and 101 test
 ## Tasks, in order
 
 ### 1. Decide the card set with Jason
+Jason asked (Nov 2026) for the real Netrunner card names. Claude declined to rename the set to published cards (see `CLAUDE.md`: original game). This is still open. The options offered were to keep Breachline as is, or to change the original designs so they teach the same mechanics as the real game.
+
 The request was for System Gateway cards; what exists is an original 40-design set. Ask Jason whether he wants to keep Breachline as is, or change the card pool. Any new card must be an original design (see `CLAUDE.md`). Adding a card is: an entry in `data/cards.json`, its effect in `src/engine/actions.ts` (and `legal.ts` if it needs a target or a condition), a test block in `tests/cards.test.ts`, and a line of bot handling in `src/bots/bot.ts`.
 
 ### 2. Play it and fix what feels wrong
@@ -31,7 +33,7 @@ Play at least three full games as each side on a phone. Things to look at:
 
 ### 4. Hardening
 - The soak test takes about 30 seconds, mostly `structuredClone` of a growing event list. If it gets in the way, cap `events` or move the log out of the cloned state.
-- Add a fuzz test with random (not bot) legal actions on both sides; the bots only reach the lines they like.
+- Done: `tests/fuzz.test.ts` plays 60 games of uniformly random legal actions on both sides. It checks the invariants after every step, that `apply` never mutates its input, and that every listed action applies.
 - Saved games have no version field beyond the storage key (`breachline:save:v1`). Bump the key if `GameState` changes shape.
 
 ### 5. Nice to have
