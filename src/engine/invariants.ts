@@ -1,6 +1,6 @@
 // Checks that must hold after every action. Used by the soak tests.
 import { cardOf, deckList } from './cards';
-import { maxHand, ramLimit, ramUsed } from './state';
+import { corpSources, ghostSources, maxHand, ramLimit, ramUsed } from './state';
 import { MAX_ICE, type CardId, type GameState } from './types';
 
 export function allCards(s: GameState): CardId[] {
@@ -36,6 +36,16 @@ export function violations(s: GameState): string[] {
   if (g.heat < 0) v.push('negative heat');
   if (ramUsed(s) > ramLimit(s)) v.push('programs exceed RAM');
   if (g.core < 0) v.push('negative core damage');
+  if (c.badPublicity < 0) v.push('negative bad publicity');
+  if (cardOf(c.identity).type !== 'identity' || cardOf(g.identity).type !== 'identity') v.push('a side has no identity');
+  for (const [card, host] of Object.entries(g.hosted)) {
+    if (!g.programs.includes(card)) v.push(`${card} is hosted but not installed`);
+    if (!g.gear.includes(host)) v.push(`${card} is hosted on ${host}, which is not installed`);
+  }
+  for (const [card, n] of Object.entries(g.virus)) if (!g.programs.includes(card) || n < 0) v.push(`bad virus counters on ${card}`);
+  for (const card of Object.keys(g.recurring)) if (!ghostSources(s).includes(card)) v.push(`recurring credits on ${card}, which is not in play`);
+  for (const card of Object.keys(c.recurring)) if (!corpSources(s).includes(card)) v.push(`recurring credits on ${card}, which is not in play`);
+  if (s.run && s.run.bpCredits < 0) v.push('negative bad publicity credits');
   for (const n of c.nodes) {
     if (n.ice.length > MAX_ICE) v.push(`${n.id} has too much ICE`);
     for (const i of n.ice) if (cardOf(i.card).type !== 'ice') v.push(`${i.card} is installed as ICE`);

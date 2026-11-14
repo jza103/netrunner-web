@@ -47,12 +47,24 @@ export function is(id: CardId, def: string): boolean {
 /** The built-in decks, by card id and copies. */
 export function defaultDeck(side: Side): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const c of CARDS) if (c.side === side) out[c.id] = c.copies;
+  for (const c of CARDS) if (c.side === side && c.type !== 'identity') out[c.id] = c.copies;
   return out;
 }
 
+/** The first identity of each side in the built-in set. */
+export function defaultIdentities(): Record<Side, string> {
+  return { corp: CARDS.find((c) => c.type === 'identity' && c.side === 'corp')!.id, ghost: CARDS.find((c) => c.type === 'identity' && c.side === 'ghost')!.id };
+}
+
 export function defaultSetup(): GameSetup {
-  return { packName: null, cards: [], decks: { corp: defaultDeck('corp'), ghost: defaultDeck('ghost') } };
+  return { packName: null, identities: defaultIdentities(), cards: [], decks: { corp: defaultDeck('corp'), ghost: defaultDeck('ghost') } };
+}
+
+/** Identities a side can choose from in this setup: built-in ones not replaced by the pack, and the pack's. */
+export function identitiesFor(setup: GameSetup, side: Side): CardDef[] {
+  ensureCards({ setup });
+  const replaced = new Set(setup.cards.map((c) => c.id.replace(/^x[0-9a-f]{8}-/, '')));
+  return [...CARDS.filter((c) => !replaced.has(c.id)), ...setup.cards].filter((c) => c.type === 'identity' && c.side === side);
 }
 
 /** Every card instance for one side's deck, unshuffled. */
@@ -66,7 +78,7 @@ export function deckList(side: Side, setup: GameSetup = defaultSetup()): CardId[
 /** Every card definition this game can show: built-in plus custom. */
 export function poolOf(s: Pick<GameState, 'setup'>): CardDef[] {
   ensureCards(s);
-  const ids = new Set([...Object.keys(s.setup.decks.corp), ...Object.keys(s.setup.decks.ghost)]);
+  const ids = new Set([s.setup.identities.corp, s.setup.identities.ghost, ...Object.keys(s.setup.decks.corp), ...Object.keys(s.setup.decks.ghost)]);
   return [...ids].map((id) => byId.get(id)!).filter(Boolean);
 }
 
@@ -115,12 +127,19 @@ export function effectText(e: Effect, owner: Side = 'corp'): string {
     case 'run': {
       const bits = [`Make a run on ${nodeWord[e.node]}.`];
       if (e.noActivate) bits.push('The Corp cannot activate ICE during this run.');
+      if (e.bypass) bits.push(`Bypass the first ${e.bypass === 1 ? 'ICE' : `${e.bypass} ICE`} you encounter during this run.`);
       if (e.extraAccess) bits.push(`If it succeeds, access ${e.extraAccess} additional card${e.extraAccess === 1 ? '' : 's'}.`);
       if (e.instead?.length) bits.push(`If it succeeds, instead of accessing cards: ${e.instead.map((x) => effectText(x, 'ghost')).join(' ')}`);
       return bits.join(' ');
     }
     case 'reveal':
       return 'Look at every facedown card installed in or protecting one node.';
+    case 'trace':
+      return `Trace ${e.n}. If successful: ${e.success.map((x) => effectText(x, owner)).join(' ')}`;
+    case 'badPublicity':
+      return `The Corp takes ${e.n} bad publicity.`;
+    case 'clearBadPublicity':
+      return `The Corp removes up to ${e.n} bad publicity.`;
     case 'recover':
       return `Return 1 ${e.types.join(' or ')} from the Scrapheap to hand.`;
   }

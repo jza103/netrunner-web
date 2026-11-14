@@ -2,7 +2,7 @@
 // decks and facedown cards the human has not looked at are hidden. Nothing here changes state.
 import rulesRaw from '../../reference/RULES.md?raw';
 import { CARDS, cardOf, fullText, isHidden, nameOf } from '../engine/cards';
-import { breakerStrength, currentIce, maxHand, nodeName, points, ramLimit, ramUsed } from '../engine/state';
+import { breakerStrength, currentIce, link, maxHand, nodeName, points, ramLimit, ramUsed } from '../engine/state';
 import { eventText, viewFor } from '../engine/view';
 import type { CardDef, GameEvent, GameState, Installed, Side } from '../engine/types';
 
@@ -31,7 +31,16 @@ function cardList(v: GameState): string {
   const own = Object.entries(v.setup.decks[me]).map(([id, n]) => cardLine(cardOf(`${id}#1`), n));
   const replaced = new Set(v.setup.cards.map((c) => c.id.replace(/^x[0-9a-f]{8}-/, '')));
   const theirs = [...CARDS.filter((c) => c.side === foe && !replaced.has(c.id)), ...v.setup.cards.filter((c) => c.side === foe)].map((c) => cardLine(c));
-  return [`Your deck${v.setup.packName ? ` (card pack: ${v.setup.packName})` : ''}:`, ...own, '', `Cards ${sideName(foe)} may have (their deck list is hidden):`, ...theirs].join('\n');
+  return [
+    `Your identity: ${cardLine(cardOf(v[me].identity))}`,
+    `${sideName(foe)}'s identity: ${cardLine(cardOf(v[foe].identity))}`,
+    '',
+    `Your deck${v.setup.packName ? ` (card pack: ${v.setup.packName})` : ''}:`,
+    ...own,
+    '',
+    `Cards ${sideName(foe)} may have (their deck list is hidden):`,
+    ...theirs.filter((l) => !l.includes(' identity')),
+  ].join('\n');
 }
 
 export function systemPrompt(s: GameState): string {
@@ -80,7 +89,11 @@ export function describeTable(s: GameState): string {
     side === me
       ? `hand [${v[side].hand.length}/${maxHand(v, side)}]: ${v[side].hand.map((x) => `${nameOf(x)} (${fullText(cardOf(x))})`).join('; ') || 'empty'}`
       : `hand: ${v[side].hand.length} cards (hidden)`;
-  lines.push(`Corp: ${c.credits} credits, ${c.cycles} cycles left, ${hand('corp')}; Mainframe ${c.deck.length} cards; Dump ${c.discard.length} cards (${c.discard.filter((x) => !isHidden(x)).map(nameOf).join(', ') || 'none faceup'}).`);
+  const rec = (side: Side) => {
+    const r = Object.entries(v[side].recurring).filter(([, n]) => n > 0);
+    return r.length ? `, recurring credits: ${r.map(([k, n]) => `${nameOf(k)} ${n}`).join(', ')}` : '';
+  };
+  lines.push(`Corp: ${c.credits} credits${rec('corp')}, bad publicity ${c.badPublicity}, ${c.cycles} cycles left, ${hand('corp')}; Mainframe ${c.deck.length} cards; Dump ${c.discard.length} cards (${c.discard.filter((x) => !isHidden(x)).map(nameOf).join(', ') || 'none faceup'}).`);
   for (const n of c.nodes) {
     const ice = n.ice.length ? [...n.ice].reverse().map(inst).join(' → ') : 'no ICE';
     const root = n.id.startsWith('site') ? `; inside: ${n.root ? inst(n.root) : 'nothing'}` : '';
@@ -88,8 +101,8 @@ export function describeTable(s: GameState): string {
     lines.push(`  ${nodeName(n.id)}: ICE outermost to innermost: ${ice}${root}${ups}`);
   }
   lines.push(
-    `Ghost: ${g.credits} credits, ${g.cycles} cycles left, heat ${g.heat}${g.core ? `, core damage ${g.core}` : ''}, RAM ${ramUsed(v)}/${ramLimit(v)}, ${hand('ghost')}; ` +
-      `programs: ${g.programs.map(nameOf).join(', ') || '-'}; gear: ${g.gear.map(nameOf).join(', ') || '-'}; contacts: ${g.contacts.map(nameOf).join(', ') || '-'}; ` +
+    `Ghost: ${g.credits} credits${rec('ghost')}, ${g.cycles} cycles left, link ${link(v)}, heat ${g.heat}${g.core ? `, core damage ${g.core}` : ''}, RAM ${ramUsed(v)}/${ramLimit(v)}, ${hand('ghost')}; ` +
+      `programs: ${g.programs.map((p) => `${nameOf(p)}${g.hosted[p] ? ` (hosted on ${nameOf(g.hosted[p])})` : ''}${g.virus[p] ? ` [${g.virus[p]} virus]` : ''}`).join(', ') || '-'}; gear: ${g.gear.map(nameOf).join(', ') || '-'}; contacts: ${g.contacts.map(nameOf).join(', ') || '-'}; ` +
       `deck ${g.deck.length}; Scrapheap ${g.discard.length}.`,
   );
   if (v.run) {
@@ -102,6 +115,12 @@ export function describeTable(s: GameState): string {
         '.',
     );
   }
+  if (v.trace)
+    lines.push(
+      `Trace in progress from ${v.trace.source}: base ${v.trace.base}` +
+        (v.trace.corpBoost === null ? ', the Corp is choosing its boost.' : `, the Corp boosted it to ${v.trace.base + v.trace.corpBoost}; the Ghost is choosing how much link to buy.`),
+    );
+  if (v.run?.bpCredits) lines.push(`Bad publicity credits left for this run: ${v.run.bpCredits}.`);
   if (v.winner) lines.push(`Winner: ${sideName(v.winner)} (${v.winReason})`);
   return lines.join('\n');
 }

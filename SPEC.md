@@ -21,7 +21,8 @@ Why: the assistant that built this does not recreate a specific existing game (i
 **In v1**
 
 - Full rules of Breachline (see `reference/RULES.md`): turns, cycles, credits, installing, ICE, upgrades, runs with approach / encounter / break / jack out / reaching the node / access, Corp activation during runs, net, meat and core damage, heat, scoring and stealing, all win conditions
-- All 45 card designs (93 cards: a 52-card Corp deck and a 41-card Ghost deck)
+- 4 identities (2 per side) and 57 card designs (112 cards: a 61-card Corp deck and a 51-card Ghost deck), plus an in-app deck builder
+- Traces and link, bad publicity, recurring credits, viruses and purging, bypass, hosting
 - Custom card packs: Jason's own cards as JSON, checked by the engine and played by the same rules code (`reference/CARD_PACKS.md`)
 - A rule-based bot for each side
 - Save and resume in the browser
@@ -30,7 +31,7 @@ Why: the assistant that built this does not recreate a specific existing game (i
 
 **Not in v1**
 
-- Deck building in the app (deck lists can be set in a card pack), more factions or identities
+- Factions and influence, deck-building rules beyond size limits
 - Human-vs-human play, accounts, a backend
 - Bot difficulty levels or personalities
 

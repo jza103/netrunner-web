@@ -13,6 +13,8 @@ export function icon(d: CardDef): string {
       return d.trap ? '🪤' : '🏢';
     case 'upgrade':
       return '🛡️';
+    case 'identity':
+      return '🪪';
     case 'directive':
       return '📜';
     case 'program':
@@ -69,7 +71,7 @@ export function describeAction(s: GameState, a: Action): string {
       return '🃏 Draw 1 card';
     case 'install': {
       const d = cardOf(a.card);
-      if (d.side === 'ghost') return `⬇️ Install ${d.name} (${d.cost}¢)`;
+      if (d.side === 'ghost') return a.host ? `⬇️ Install ${d.name} on ${label(a.host)} (${d.cost}¢, no RAM)` : `⬇️ Install ${d.name} (${d.cost}¢)`;
       const cost = d.type === 'ice' && a.node && a.node !== 'new' ? nodeOf(s, a.node).ice.length : 0;
       const spot = a.node === 'new' ? 'a new site' : nodeName(a.node!);
       const swap = d.type !== 'ice' && d.type !== 'upgrade' && a.node !== 'new' && nodeOf(s, a.node!).root ? ' (trashes what is there)' : '';
@@ -128,6 +130,13 @@ export function describeAction(s: GameState, a: Action): string {
       return `🗑️ Trash ${label(a.card)}`;
     case 'discard':
       return `🗑️ Discard ${label(a.card)}`;
+    case 'traceBoost':
+      if (s.trace?.corpBoost === null) return a.n ? `📡 Raise the trace by ${a.n} (${a.n}¢) → ${s.trace.base + a.n}` : `📡 Trace at ${s.trace.base} (pay nothing)`;
+      return a.n ? `📶 Raise your link by ${a.n} (${a.n}¢)` : '📶 Pay nothing for link';
+    case 'spendVirus':
+      return `🦠 ${label(a.card)}: spend a virus counter, -1 ICE strength`;
+    case 'purge':
+      return '🧹 Purge viruses (all 3 cycles)';
     case 'endTurn':
       return '⏭️ End turn';
   }

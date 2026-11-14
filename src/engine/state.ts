@@ -1,5 +1,6 @@
 // Game setup and read-only helpers shared by the rules, the bots and the UI.
 import { cardOf, defaultSetup, deckList, ensureCards, is } from './cards';
+import type { Purpose, RecurringUse } from './types';
 import { seedFrom, shuffle } from './rng';
 import { BASE_RAM, HAND_SIZE, type CardId, type GameSetup, type GameState, type Installed, type NodeId, type NodeState, type Side } from './types';
 
@@ -8,10 +9,13 @@ export interface NewGameOptions {
   human: Side;
   /** which cards to play with; defaults to the built-in set */
   setup?: GameSetup;
+  /** identity choices, overriding the setup's */
+  identities?: Partial<Record<Side, string>>;
 }
 
 export function newGame(opts: NewGameOptions): GameState {
-  const setup = opts.setup ?? defaultSetup();
+  const base = opts.setup ?? defaultSetup();
+  const setup: GameSetup = { ...base, identities: { ...base.identities, ...opts.identities } };
   ensureCards({ setup });
   const s: GameState = {
     rngState: seedFrom(opts.seed),
@@ -22,8 +26,12 @@ export function newGame(opts: NewGameOptions): GameState {
     turnNumber: 0,
     phase: 'mulligan',
     mulligan: 'corp',
+    trace: null,
     corp: {
+      identity: `${setup.identities.corp}#1`,
       credits: 5,
+      badPublicity: 0,
+      recurring: {},
       cycles: 0,
       hand: [],
       deck: deckList('corp', setup),
@@ -38,7 +46,7 @@ export function newGame(opts: NewGameOptions): GameState {
       ],
       siteCount: 0,
     },
-    ghost: { credits: 5, cycles: 0, hand: [], deck: deckList('ghost', setup), discard: [], scored: [], programs: [], gear: [], contacts: [], heat: 0, core: 0, known: [] },
+    ghost: { identity: `${setup.identities.ghost}#1`, recurring: {}, virus: {}, hosted: {}, credits: 5, cycles: 0, hand: [], deck: deckList('ghost', setup), discard: [], scored: [], programs: [], gear: [], contacts: [], heat: 0, core: 0, known: [] },
     run: null,
     flags: { successfulRun: false, prevented: { net: 0, meat: 0, core: 0 } },
     ghostSuccessLastTurn: false,
@@ -77,6 +85,7 @@ export function nodeOf(s: GameState, id: NodeId): NodeState {
 /** Who must act now, or null when the game is over. */
 export function actor(s: GameState): Side | null {
   if (s.phase === 'gameOver') return null;
+  if (s.trace) return s.trace.corpBoost === null ? 'corp' : 'ghost';
   if (s.phase === 'mulligan') return s.mulligan;
   if (s.phase === 'run' && s.run) return s.run.step === 'approach' || s.run.step === 'approachNode' || s.run.step === 'corpTrash' ? 'corp' : 'ghost';
   return s.turn;
@@ -95,9 +104,50 @@ export function rigOf(s: GameState): CardId[] {
   return [...s.ghost.programs, ...s.ghost.gear, ...s.ghost.contacts];
 }
 
-/** Sum of a numeric field over the Ghost's installed cards. */
+/** The Ghost's identity and installed cards: everything whose abilities are in play. */
+export function ghostSources(s: GameState): CardId[] {
+  return [s.ghost.identity, ...rigOf(s)];
+}
+
+/** Sum of a numeric field over the Ghost's identity and installed cards. */
 export function rigSum(s: GameState, f: (c: ReturnType<typeof cardOf>) => number | undefined): number {
-  return rigOf(s).reduce((n, c) => n + (f(cardOf(c)) ?? 0), 0);
+  return ghostSources(s).reduce((n, c) => n + (f(cardOf(c)) ?? 0), 0);
+}
+
+export function link(s: GameState): number {
+  return rigSum(s, (d) => d.link);
+}
+
+/** Corp cards whose abilities are in play: the identity and active installed assets and upgrades. */
+export function corpSources(s: GameState): CardId[] {
+  const out = [s.corp.identity];
+  for (const n of s.corp.nodes) for (const i of [...(n.root ? [n.root] : []), ...n.upgrades]) if (i.active) out.push(i.card);
+  return out;
+}
+
+const RECURRING_FOR: Record<RecurringUse, Purpose[]> = {
+  breakers: ['boost', 'break'],
+  activateIce: ['activateIce'],
+  trace: ['trace'],
+  any: ['install', 'play', 'develop', 'activate', 'activateIce', 'boost', 'break', 'steal', 'trashAccess', 'trace', 'other'],
+};
+
+/** Recurring credits on these cards that may pay for this purpose. */
+export function recurringFor(s: GameState, side: Side, purpose: Purpose): { card: CardId; n: number }[] {
+  return Object.entries(s[side].recurring)
+    .filter(([c, n]) => n > 0 && !isHiddenId(c) && RECURRING_FOR[cardOf(c).recurring?.for ?? 'any'].includes(purpose))
+    .map(([card, n]) => ({ card, n }));
+}
+
+function isHiddenId(c: CardId) {
+  return c.startsWith('?');
+}
+
+/** Everything a side can spend on this purpose now: credits, matching recurring credits, and bad publicity credits during a run. */
+export function available(s: GameState, side: Side, purpose: Purpose): number {
+  const rec = recurringFor(s, side, purpose).reduce((a, r) => a + r.n, 0);
+  const bp = side === 'ghost' && s.run ? s.run.bpCredits : 0;
+  return s[side].credits + rec + bp;
 }
 
 export function ramLimit(s: GameState): number {
@@ -105,7 +155,15 @@ export function ramLimit(s: GameState): number {
 }
 
 export function ramUsed(s: GameState): number {
-  return s.ghost.programs.reduce((n, c) => n + (cardOf(c).ram ?? 1), 0);
+  return s.ghost.programs.filter((c) => !s.ghost.hosted[c]).reduce((n, c) => n + (cardOf(c).ram ?? 1), 0);
+}
+
+/** Gear that can host another program now. */
+export function hostsWithRoom(s: GameState): CardId[] {
+  return s.ghost.gear.filter((g) => {
+    const h = cardOf(g).host;
+    return h && Object.values(s.ghost.hosted).filter((x) => x === g).length < h.max;
+  });
 }
 
 export function maxHand(s: GameState, side: Side): number {
@@ -135,11 +193,14 @@ export function iceStrength(s: GameState, card: CardId): number {
   const base = cardOf(card).strength ?? 0;
   const where = findInstalled(s, card);
   if (!where) return base;
-  return base + where.node.upgrades.reduce((n, u) => n + (u.active ? (cardOf(u.card).iceStrength ?? 0) : 0), 0);
+  const minus = s.run && currentIce(s)?.card === card ? s.run.iceMinus : 0;
+  return Math.max(0, base + where.node.upgrades.reduce((n, u) => n + (u.active ? (cardOf(u.card).iceStrength ?? 0) : 0), 0) - minus);
 }
 
 export function breakerStrength(s: GameState, card: CardId): number {
-  return (cardOf(card).breaker?.strength ?? 0) + (s.run?.boost[card] ?? 0);
+  const host = s.ghost.hosted[card];
+  const hosted = host ? (cardOf(host).host?.breakerStrength ?? 0) : 0;
+  return (cardOf(card).breaker?.strength ?? 0) + hosted + (s.run?.boost[card] ?? 0);
 }
 
 export function canBreak(card: CardId, ice: CardId): boolean {

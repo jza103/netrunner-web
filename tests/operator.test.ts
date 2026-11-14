@@ -17,7 +17,9 @@ describe('Operator prompts', () => {
     expect(sys).toContain('You are the Operator');
     expect(sys).toContain('Never invent');
     expect(sys).toContain('## Runs');
-    for (const c of CARDS) expect(sys).toContain(c.name);
+    // every card, except identities that are not in this game
+    const g = newGame({ seed: 1, human: 'ghost' });
+    for (const c of CARDS) if (c.type !== 'identity' || [g.corp.identity, g.ghost.identity].includes(`${c.id}#1`)) expect(sys).toContain(c.name);
     expect(systemPrompt(newGame({ seed: 1, human: 'corp' }))).toContain('The player is the Corp');
   });
 

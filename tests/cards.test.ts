@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { CARDS } from '../src/engine/cards';
 import { legalActions } from '../src/engine/legal';
-import { actor, iceStrength, maxHand, nodeOf, points, ramLimit } from '../src/engine/state';
+import { actor, breakerStrength, iceStrength, link, maxHand, nodeOf, points, ramLimit, ramUsed } from '../src/engine/state';
 import { viewFor } from '../src/engine/view';
 import { act, actRaw, blank, corpTurn, ghostTurn, hand, ice, rejects, rig, site, take, upgrade } from './helpers';
 
@@ -601,6 +601,193 @@ describe('damage kinds, upgrades and activating during runs', () => {
     u = actRaw(u, { type: 'decline' });
     expect(u.ghost.credits).toBe(2);
     expect(relay).toBeTruthy();
+  });
+});
+
+describe('identities, traces, bad publicity, viruses, bypass, recurring credits, hosting', () => {
+  card('helix-dynamics', 'Corp identity: gain 2 credits whenever you score a project', () => {
+    let s = corpTurn(blank('ghost', { corp: 'helix-dynamics' }), 0);
+    const { card: c } = site(s, 'quiet-acquisition', { dev: 2 });
+    s = act(s, { type: 'score', card: c });
+    expect(s.corp.credits).toBe(2);
+  });
+  card('vigil-systems', 'Corp identity: the Ghost gains 1 heat whenever they steal a project', () => {
+    let s = ghostTurn(blank('ghost', { corp: 'vigil-systems' }));
+    const { id } = site(s, 'quiet-acquisition');
+    s.corp.credits = 0;
+    s = act(s, { type: 'run', node: id });
+    s = act(s, { type: 'steal' });
+    expect(s.ghost.heat).toBe(1);
+  });
+  card('wren-ortiz', 'Ghost identity: link 1; 1 credit on the first successful run each turn', () => {
+    let s = ghostTurn(blank('ghost', { ghost: 'wren-ortiz' }), 0);
+    expect(link(s)).toBe(1);
+    s.corp.credits = 0;
+    s = act(s, { type: 'run', node: 'command' });
+    s = act(s, { type: 'run', node: 'command' });
+    expect(s.ghost.credits).toBe(1);
+  });
+  card('halcyon', 'Ghost identity: link 0, +1 maximum hand size', () => {
+    const s = blank('ghost', { ghost: 'halcyon' });
+    expect(link(s)).toBe(0);
+    expect(maxHand(s, 'ghost')).toBe(6);
+  });
+  card('grey-market-merger', 'needs 3 counters, 2 points; when scored gain 5 and take 1 bad publicity', () => {
+    let s = corpTurn(blank(), 0);
+    const { card: c } = site(s, 'grey-market-merger', { dev: 3 });
+    s = act(s, { type: 'score', card: c });
+    expect([s.corp.credits, s.corp.badPublicity, points(s, 'corp')]).toEqual([5, 1, 2]);
+  });
+  card('scent-tracker', 'hunter 3/2: trace 3, on success 1 heat; then end the run', () => {
+    let s = ghostTurn(blank(), 5);
+    ice(s, 'command', 'scent-tracker');
+    s.corp.credits = 2;
+    s = act(s, { type: 'run', node: 'command' });
+    s = act(s, { type: 'proceed' });
+    expect(actor(s)).toBe('corp');
+    expect(legalActions(s)).toEqual([0, 1, 2].map((n) => ({ type: 'traceBoost', n })));
+    s = act(s, { type: 'traceBoost', n: 1 }); // trace 4 against link 0
+    expect(actor(s)).toBe('ghost');
+    expect(legalActions(s)).toHaveLength(5); // pay 0 to 4
+    s = act(s, { type: 'traceBoost', n: 4 }); // link 4: the trace fails
+    expect(s.ghost.heat).toBe(0);
+    expect(s.run).toBeNull(); // the second subroutine still ends the run
+    expect([s.corp.credits, s.ghost.credits]).toEqual([1, 1]);
+    let t = ghostTurn(blank(), 5);
+    ice(t, 'command', 'scent-tracker');
+    t = act(t, { type: 'run', node: 'command' });
+    t = act(t, { type: 'proceed' });
+    t = act(t, { type: 'traceBoost', n: 0 });
+    t = act(t, { type: 'traceBoost', n: 0 });
+    expect(t.ghost.heat).toBe(1);
+  });
+  card('security-budget', 'while active: 2 recurring credits each Corp turn, only to activate ICE', () => {
+    let s = corpTurn(blank(), 1);
+    const { card: b } = site(s, 'security-budget');
+    s = act(s, { type: 'activate', card: b });
+    expect(s.corp.recurring[b]).toBe(2);
+    expect(s.corp.credits).toBe(0);
+    // not for other costs
+    const [p] = hand(s, 'corp', 'quarterly-windfall');
+    expect(legalActions(s)).not.toContainEqual({ type: 'play', card: p });
+    // for ICE: a strength-4 Bulkhead costs 3: 2 recurring + 1 credit
+    s = ghostTurn(s);
+    s.corp.credits = 1;
+    const w = ice(s, 'mainframe', 'bulkhead', false);
+    s = act(s, { type: 'run', node: 'mainframe' });
+    s = act(s, { type: 'activate', card: w });
+    expect([s.corp.recurring[b], s.corp.credits]).toEqual([0, 0]);
+    // refilled when the Corp's turn begins
+    s = act(s, { type: 'proceed' });
+    s.ghost.cycles = 0;
+    s = act(s, { type: 'endTurn' });
+    expect(s.corp.recurring[b]).toBe(2);
+  });
+  card('records-request', 'only after a successful Ghost run last turn: trace 4, on success 1 heat', () => {
+    let s = corpTurn(blank(), 3);
+    const [c] = hand(s, 'corp', 'records-request');
+    rejects(s, { type: 'play', card: c });
+    s.ghostSuccessLastTurn = true;
+    s = act(s, { type: 'play', card: c });
+    s = act(s, { type: 'traceBoost', n: 2 }); // trace 6
+    s.ghost.credits = 6;
+    s = act(s, { type: 'traceBoost', n: 5 }); // link 5: not enough
+    expect(s.ghost.heat).toBe(1);
+    expect(s.ghost.credits).toBe(1);
+  });
+  card('damage-control', 'removes 1 bad publicity', () => {
+    let s = corpTurn(blank());
+    s.corp.badPublicity = 2;
+    const [c] = hand(s, 'corp', 'damage-control');
+    s = act(s, { type: 'play', card: c });
+    expect(s.corp.badPublicity).toBe(1);
+  });
+  card('rot-crawler', 'virus: a counter per successful Mainframe run; +1 Mainframe access per 2 counters', () => {
+    let s = ghostTurn(blank());
+    s.corp.credits = 0;
+    const [r] = rig(s, 'rot-crawler');
+    s = act(s, { type: 'run', node: 'mainframe' });
+    expect(s.ghost.virus[r]).toBe(1);
+    expect(s.run!.accessQueue).toHaveLength(0); // 1 card: the one being accessed
+    s = act(s, { type: 'leave' });
+    s = act(s, { type: 'run', node: 'mainframe' }); // second counter lands before access
+    expect(s.ghost.virus[r]).toBe(2);
+    expect(s.run!.accessQueue).toHaveLength(1);
+    s = act(s, { type: 'leave' });
+    s = act(s, { type: 'leave' });
+    s = act(s, { type: 'run', node: 'command' });
+    expect(s.ghost.virus[r]).toBe(2); // not for Command
+  });
+  card('termite-script', 'virus: a counter per successful central run; spend one for -1 ICE strength this encounter', () => {
+    let s = ghostTurn(blank());
+    const [t] = rig(s, 'termite-script');
+    const [key] = rig(s, 'skeleton-key');
+    s.ghost.virus[t] = 2;
+    const gate = ice(s, 'mainframe', 'prism-lock'); // strength 4
+    s = act(s, { type: 'run', node: 'mainframe' });
+    s = act(s, { type: 'spendVirus', card: t });
+    s = act(s, { type: 'spendVirus', card: t });
+    expect(iceStrength(s, gate)).toBe(2);
+    expect(legalActions(s)).toContainEqual({ type: 'break', card: key, sub: 0 });
+    expect(legalActions(s).some((a) => a.type === 'spendVirus')).toBe(false);
+    s = act(s, { type: 'break', card: key, sub: 0 });
+    s = act(s, { type: 'break', card: key, sub: 1 });
+    s = act(s, { type: 'proceed' });
+    expect(iceStrength(s, gate)).toBe(4); // only for that encounter
+    s = act(s, { type: 'continue' });
+    s.corp.credits = 0;
+    expect(s.ghost.virus[t]).toBe(1); // spent 2, gained 1 on the successful central run
+  });
+  card('exo-frame', 'hosts 1 program, which uses no RAM; a hosted breaker has +1 strength', () => {
+    let s = ghostTurn(blank());
+    const [frame] = rig(s, 'exo-frame');
+    rig(s, 'crowbar', 'crowbar', 'crowbar', 'skeleton-key'); // RAM full
+    const [blade] = hand(s, 'ghost', 'stiletto');
+    expect(legalActions(s)).not.toContainEqual({ type: 'install', card: blade });
+    s = act(s, { type: 'install', card: blade, host: frame });
+    expect(ramUsed(s)).toBe(4);
+    expect(breakerStrength(s, blade)).toBe(3);
+    const [other] = hand(s, 'ghost', 'stiletto');
+    expect(legalActions(s)).not.toContainEqual({ type: 'install', card: other, host: frame }); // full
+    // scrapping the hosted program frees the host
+    s = act(s, { type: 'scrap', card: blade });
+    expect(s.ghost.hosted).toEqual({});
+    expect(legalActions(s)).toContainEqual({ type: 'install', card: other, host: frame });
+  });
+  card('hot-cache', '2 recurring credits each Ghost turn, only for breakers', () => {
+    let s = ghostTurn(blank(), 2);
+    const [c] = hand(s, 'ghost', 'hot-cache');
+    s = act(s, { type: 'install', card: c });
+    expect(s.ghost.recurring[c]).toBe(2);
+    const [key] = rig(s, 'skeleton-key');
+    ice(s, 'command', 'riddlegate');
+    s = act(s, { type: 'run', node: 'command' });
+    s = act(s, { type: 'break', card: key, sub: 0 });
+    s = act(s, { type: 'break', card: key, sub: 1 });
+    expect([s.ghost.recurring[c], s.ghost.credits]).toEqual([0, 0]);
+  });
+  card('signal-booster', '+2 link', () => {
+    const s = ghostTurn(blank());
+    rig(s, 'signal-booster');
+    expect(link(s)).toBe(2);
+  });
+  card('side-door', 'run any node, bypassing the first ICE encountered', () => {
+    let s = ghostTurn(blank());
+    const [c] = hand(s, 'ghost', 'side-door');
+    ice(s, 'mainframe', 'tripwire');
+    ice(s, 'mainframe', 'bulkhead');
+    s = act(s, { type: 'play', card: c, node: 'mainframe' });
+    expect(s.run!.step).toBe('passed'); // Bulkhead (outermost) bypassed
+    s = act(s, { type: 'continue' });
+    expect(s.run!.step).toBe('encounter'); // Tripwire is met normally
+  });
+  card('press-leak', 'only after your successful run last turn: the Corp takes 1 bad publicity', () => {
+    let s = ghostTurn(blank());
+    const [c] = hand(s, 'ghost', 'press-leak');
+    rejects(s, { type: 'play', card: c });
+    s.ghostSuccessLastTurn = true;
+    s = act(s, { type: 'play', card: c });
+    expect(s.corp.badPublicity).toBe(1);
   });
 });
 

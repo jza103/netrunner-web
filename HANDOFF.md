@@ -22,10 +22,12 @@ Jason asked for the real System Gateway cards. Claude declined to copy the publi
 - **Damage kinds:** net, meat and core (Synapse Spike, Flak Vest).
 - **Custom card packs:** `src/engine/pack.ts`, the pack sheet on the start screen, `reference/CARD_PACKS.md`, `packs/sample-pack.json`.
 
-Still missing compared with the genre (no decision needed unless Jason asks): identities, traces and link, bad publicity, virus counters and purging, bypass, recurring credits, hosting, and deck building in the app.
+Then, at Jason's request, the rest of the gap list was added: identities (Helix Dynamics, Vigil Systems, Wren "Static" Ortiz, Halcyon), traces and link (Scent Tracker, Records Request, Signal Booster), bad publicity (Grey Market Merger, Damage Control, Press Leak), recurring credits (Security Budget, Hot Cache), viruses and purging (Rot Crawler, Termite Script), bypass (Side Door), hosting (Exo Frame), and an in-app deck builder (Cards → Edit decks). All are in the pack format too. Bot-vs-bot after this: Corp about 57%, Ghost 43% (`scripts/sim.ts`).
 
 Follow-ups:
-- Corp bot win rate went from 56% to 60% (`scripts/sim.ts`). Part of task 3.
+- Decks grew to 61 Corp and 51 Ghost cards; deck size and copy counts are worth tuning together with the bots in task 3.
+- The Ghost bot rarely hosts programs on Exo Frame (2 hosted installs in 100 bot games); it only does so when RAM is tight.
+- The trace action bar shows one button per amount; with lots of credits that is a long row. A stepper may read better.
 - The Ghost bot does not plan for facedown upgrades (it does count active Lockout Relays).
 - A pack card that needs a new op cannot be written yet. Each new op needs: the type, `runEffect`, the slot table in `pack.ts`, `effectText`, a test.
 

@@ -2,7 +2,9 @@
 
 A card pack is a JSON file of your own cards. Load it from the start screen: **Cards → Change → Load a pack file** (or paste the JSON). The engine checks every card first, and nothing loads until the whole pack passes. New games then use the pack, and a saved game keeps the cards it started with, even if you load a different pack later.
 
-The quickest start: on the same screen, **Download built-in set as a pack**, edit the file, and load it back. `packs/sample-pack.json` in the repo shows most of the features.
+To change only which cards are in the decks, use **Cards → Edit decks**. It adds and removes copies from the built-in set and your pack, checks the deck sizes, and can export the result as a pack file.
+
+For new cards, the quickest start is on the pack screen: **Download built-in set as a pack**, edit the file, and load it back. `packs/sample-pack.json` in the repo shows most of the features.
 
 Custom cards are played by the same engine code as the built-in cards. A card's behaviour comes only from its fields and effects, listed below. Its `text` is what the player reads, so write it to match its effects exactly. The engine cannot check that for you.
 
@@ -30,9 +32,9 @@ Inside a game, pack cards get ids like `x1a2b3c4d-my-card`, where the hex is a h
 |---|---|
 | `id`, `name`, `text` | required. `text` may be `""` for ICE and breakers, whose subroutine and breaker lines are generated. |
 | `side` | `"corp"` or `"ghost"` |
-| `type` | Corp: `project`, `ice`, `asset`, `upgrade`, `directive`. Ghost: `program`, `gear`, `contact`, `stunt`. |
+| `type` | Corp: `project`, `ice`, `asset`, `upgrade`, `directive`, `identity`. Ghost: `program`, `gear`, `contact`, `stunt`, `identity`. |
 | `copies` | 0 to 20 |
-| `cost` | credits to install, play or activate. Every type except `project` needs one. |
+| `cost` | credits to install, play or activate. Every type except `project` and `identity` needs one. |
 
 Numbers are whole numbers from 0 to 20. Any field not listed here is rejected, which catches typos.
 
@@ -55,6 +57,8 @@ Numbers are whole numbers from 0 to 20. Any field not listed here is rejected, w
 
 **directive** (Corp) and **stunt** (Ghost): `onPlay` effects, optional `playIf` (`"ghostHasHeat"` or `"ghostRanLastTurn"`). A directive can also have `removeAfterPlay: true`.
 
+**identity**: never in a deck; chosen when a game starts (a pack's first identity per side is the default). It can have `link` (Ghost), `onTurnStart`, `recurring`, `handBonus`, `ramBonus`, `prevent`, `mainframeAccess`, `onFirstSuccessfulRun` (Ghost), `onCorpScore` (Corp: whenever the Corp scores a project) and `onSteal` (Corp: whenever the Ghost steals one).
+
 **program**: `ram`, and optionally `breaker`:
 `{ "breaks": "wall" | "cipher" | "hunter" | "any", "strength": 1, "boostCost": 1, "boostBy": 1, "breakCost": 1 }`
 
@@ -63,8 +67,14 @@ Numbers are whole numbers from 0 to 20. Any field not listed here is rejected, w
 - `handBonus`: extra maximum hand size.
 - `prevent`: for example `{ "net": 1, "meat": 2 }`. Prevents the first N damage of each kind per turn.
 - `mainframeAccess`: extra cards accessed from the Mainframe.
+- `link`: link strength against traces.
+- `recurring`: `{ "n": 2, "for": "breakers" | "activateIce" | "trace" | "any" }`. Credits that refill at the start of each of the owner's turns and can pay only for that. Assets and upgrades can have this too, for the Corp, while they are active.
 - `onTurnStart`: fires at the start of the Ghost's turn.
 - `onFirstSuccessfulRun`: fires on the first successful run each turn.
+- **Virus programs:** `virusOn` (`central`, `mainframe`, `command`, `dump`, `any`) places a virus counter after each successful run there. Then:
+  - `virusAccess: N` gives +1 Mainframe access for every N counters.
+  - `virusSpend: true` lets the Ghost spend a counter while encountering ICE, for -1 ICE strength in that encounter.
+- **gear** only: `host: { "max": 1, "breakerStrength": 1 }`. It can host programs, which use no RAM; a hosted breaker gets the extra strength.
 - `ability`: `{ "cycles": 0 or 1, "credits": 0, "trashSelf": false, "if": "ghostHasHeat", "effects": [...] }`. The Ghost uses it on their turn. `credits`, `trashSelf` and `if` are optional.
 
 ## Effects
@@ -86,16 +96,19 @@ An effect is an object with an `op`. Lists of effects resolve in order, and stop
 | `payOrEndRun` | `n` | the Ghost loses n credits; if they have fewer, the run ends instead |
 | `develop` | `n` | put n counters on an installed card that can be developed (the player picks the target) |
 | `recycleDump` | | shuffle the Dump into the Mainframe |
-| `run` | `node` (`command`, `mainframe`, `dump`, `any`), `extraAccess`?, `noActivate`?, `instead`? | make a run. `any` lets the player pick the node. `noActivate`: the Corp cannot activate ICE. `instead`: effects that replace accessing cards if the run succeeds. Must be the last effect. |
+| `trace` | `n`, `success` (effects) | trace n: the Corp may pay to raise it, then the Ghost may pay to raise their link; if the trace ends higher, `success` resolves |
+| `badPublicity` | `n` | the Corp takes n bad publicity |
+| `clearBadPublicity` | `n` | the Corp removes up to n bad publicity |
+| `run` | `node` (`command`, `mainframe`, `dump`, `any`), `extraAccess`?, `noActivate`?, `bypass`?, `instead`? | make a run. `bypass: N`: the first N ICE encountered are bypassed. `any` lets the player pick the node. `noActivate`: the Corp cannot activate ICE. `instead`: effects that replace accessing cards if the run succeeds. Must be the last effect. |
 | `reveal` | | the Ghost looks at every facedown card in or protecting one node (the player picks it) |
 | `recover` | `types` | return a card of one of these types from the Scrapheap to hand (the player picks it) |
 
 **Where each op is allowed.** The engine can only carry out some ops at certain moments:
 
-- **Everywhere:** `gain`, `draw`, `damage`, `heat`, `shedHeat`, `loseCredits`, `drain`, `loseCycle`.
-- **ICE `subs`:** also `endRun`, `trashProgram` and `payOrEndRun`.
+- **Everywhere:** `gain`, `draw`, `damage`, `heat`, `shedHeat`, `loseCredits`, `drain`, `loseCycle`, `badPublicity`, `clearBadPublicity`.
+- **ICE `subs`:** also `endRun`, `trashProgram`, `payOrEndRun` and `trace`. A trace's `success` may use the everywhere ops plus `endRun`.
 - **`onApproachNode` and `onActivateInRun`:** also `endRun` and `payOrEndRun`.
-- **Corp `onPlay`:** also `develop` and `recycleDump`.
+- **Corp `onPlay`:** also `develop`, `recycleDump` and `trace`. A trace's `success` here may use only the everywhere ops.
 - **Ghost `onPlay`:** also `run`, `reveal` and `recover`.
 - **One target per card.** A card may have only one effect that needs a target: `develop`, `reveal`, `recover`, or a `run` on `any`.
 

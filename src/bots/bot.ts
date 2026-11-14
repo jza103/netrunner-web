@@ -2,7 +2,7 @@
 // return one of legalActions(view), so they cannot cheat or make an illegal move.
 import { CARDS, cardOf, is, isHidden } from '../engine/cards';
 import { legalActions } from '../engine/legal';
-import { actor, breakerStrength, canBreak, currentIce, iceStrength, isSite, nodeOf, ramLimit, ramUsed, rigSum } from '../engine/state';
+import { actor, available, breakerStrength, canBreak, currentIce, iceStrength, isSite, link, nodeOf, ramLimit, ramUsed, rigSum } from '../engine/state';
 import type { Action, CardDef, CardId, GameState, NodeId, NodeState, Side } from '../engine/types';
 
 type Of<T extends Action['type']> = Extract<Action, { type: T }>;
@@ -46,9 +46,14 @@ function corpTurn(v: GameState, legal: Action[]): Action {
   const score = pick(legal, 'score');
   if (score) return score;
   // on its own turn, only switch on cards that pay over time; the rest wait for a run
-  const econ = pick(legal, 'activate', (a) => !!cardOf(a.card).onTurnStart?.length);
+  const econ = pick(legal, 'activate', (a) => !!cardOf(a.card).onTurnStart?.length || !!cardOf(a.card).recurring);
   if (econ) return econ;
   if (c.cycles <= 0) return pick(legal, 'endTurn')!;
+
+  // viruses snowball: purge once they add up
+  const viruses = Object.values(g.virus).reduce((a, b) => a + b, 0);
+  const purge = pick(legal, 'purge');
+  if (purge && viruses >= 3 && !pick(legal, 'develop')) return purge;
 
   // lethal or heavy Burn Notice
   const rigs = Math.max(0, rigSum(v, (d) => d.prevent?.meat) - v.flags.prevented.meat);
@@ -118,7 +123,7 @@ function corpTurn(v: GameState, legal: Action[]): Action {
   }
 
   // assets: Shell Company on its own, Decoy Lab somewhere it looks like a project
-  const shellCard = inHand('shell-company');
+  const shellCard = c.hand.find((x) => cardOf(x).type === 'asset' && !cardOf(x).trap && (cardOf(x).onTurnStart?.length || cardOf(x).recurring));
   if (shellCard) {
     const a = pick(legal, 'install', (x) => x.card === shellCard && x.node === 'new');
     if (a) return a;
@@ -154,6 +159,11 @@ function corpTurn(v: GameState, legal: Action[]): Action {
     return fx.length > 0 && fx.every((e) => e.op === 'gain' || e.op === 'draw') && !is(a.card, 'quarterly-windfall');
   });
   if (plain && c.credits >= (cardOf(plain.card).cost ?? 0) + 2) return plain;
+
+  const cleanup = pick(legal, 'play', (a) => !!cardOf(a.card).onPlay?.some((e) => e.op === 'clearBadPublicity'));
+  if (cleanup && c.badPublicity > 0 && c.credits >= 5) return cleanup;
+  const traced = pick(legal, 'play', (a) => !!cardOf(a.card).onPlay?.some((e) => e.op === 'trace'));
+  if (traced && c.credits - (cardOf(traced.card).cost ?? 0) >= 3) return traced;
 
   const hunt = pick(legal, 'trashContact');
   if (hunt && c.credits >= 6) return hunt;
@@ -235,12 +245,16 @@ interface Path {
   damage: number;
 }
 
-function pathCost(v: GameState, nodeId: NodeId, fromPos: number, noActivate = false): Path {
+function pathCost(v: GameState, nodeId: NodeId, fromPos: number, noActivate = false, bypass = 0): Path {
   const node = nodeOf(v, nodeId);
   const p: Path = { cost: 0, unknown: 0, blocked: false, damage: 0 };
   for (let pos = fromPos; pos >= 0; pos--) {
     const inst = node.ice[pos];
     if (!inst.active && noActivate) continue;
+    if (bypass > 0) {
+      bypass--;
+      continue;
+    }
     if (isHidden(inst.card)) {
       if (v.corp.credits >= 1) p.unknown++;
       continue;
@@ -294,25 +308,30 @@ interface RunChoice {
   node: NodeId;
   score: number;
   blackout: boolean;
+  sideDoor?: boolean;
 }
 
 function bestRun(v: GameState, legal: Action[]): RunChoice | null {
   const g = v.ghost;
   const hasBlackout = !!pick(legal, 'play', (a) => is(a.card, 'blackout'));
+  const hasSideDoor = !!pick(legal, 'play', (a) => !!cardOf(a.card).onPlay?.some((e) => e.op === 'run' && !!e.bypass));
+  const budget = available(v, 'ghost', 'break') + v.corp.badPublicity;
   let best: RunChoice | null = null;
   for (const n of v.corp.nodes) {
     if (!pick(legal, 'run', (a) => a.node === n.id)) continue;
     const value = nodeValue(v, n);
     if (value <= 0) continue;
-    for (const blackout of hasBlackout ? [false, true] : [false]) {
-      const p = pathCost(v, n.id, n.ice.length - 1, blackout);
-      const extra = blackout ? 2 : 0;
-      if (blackout && !n.ice.some((i) => !i.active)) continue;
-      if (p.blocked || p.cost + extra + p.unknown > g.credits) continue;
+    const options: [boolean, boolean][] = [[false, false]];
+    if (hasBlackout && n.ice.some((i) => !i.active)) options.push([true, false]);
+    if (hasSideDoor && n.ice.length) options.push([false, true]);
+    for (const [blackout, sideDoor] of options) {
+      const p = pathCost(v, n.id, n.ice.length - 1, blackout, sideDoor ? 1 : 0);
+      const extra = blackout || sideDoor ? 2 : 0;
+      if (p.blocked || p.cost + extra + p.unknown > budget) continue;
       const risk = p.damage + (p.unknown ? faceCheckDamage(v) : 0);
       if (g.hand.length < risk + 1 || g.hand.length - risk < trapRisk(v, n)) continue;
       const score = value - 0.5 * (p.cost + extra) - p.unknown;
-      if (!best || score > best.score) best = { node: n.id, score, blackout };
+      if (!best || score > best.score) best = { node: n.id, score, blackout, sideDoor };
     }
   }
   return best;
@@ -361,6 +380,7 @@ function ghostTurn(v: GameState, legal: Action[]): Action {
   const run = bestRun(v, legal);
   const go = (r: RunChoice): Action => {
     if (r.blackout) return pick(legal, 'play', (a) => is(a.card, 'blackout') && a.node === r.node)!;
+    if (r.sideDoor) return pick(legal, 'play', (a) => a.node === r.node && !!cardOf(a.card).onPlay?.some((e) => e.op === 'run' && !!e.bypass))!;
     if (r.node === 'mainframe' && play('deep-dive') && g.credits >= 3) return play('deep-dive')!;
     if (r.node === 'command' && play('payroll-heist') && v.corp.credits >= 4 && g.heat === 0) return play('payroll-heist')!;
     return pick(legal, 'run', (a) => a.node === r.node)!;
@@ -373,6 +393,16 @@ function ghostTurn(v: GameState, legal: Action[]): Action {
   if (recon) return recon;
 
   if (install('padded-rig')) return install('padded-rig')!;
+  const frame = pick(legal, 'install', (a) => !!cardOf(a.card).host);
+  if (frame && ramLimit(v) - ramUsed(v) <= 1) return frame;
+  const cache = pick(legal, 'install', (a) => !!cardOf(a.card).recurring);
+  if (cache && g.programs.some((p) => cardOf(p).breaker) && g.credits >= 4) return cache;
+  const virus = pick(legal, 'install', (a) => !!cardOf(a.card).virusOn && !a.host);
+  if (virus && ramLimit(v) - ramUsed(v) >= 2) return virus;
+  const booster = pick(legal, 'install', (a) => !!cardOf(a.card).link && cardOf(a.card).type === 'gear');
+  if (booster && g.credits >= 5 && v.turnNumber > 8) return booster;
+  const leak = pick(legal, 'play', (a) => !!cardOf(a.card).onPlay?.some((e) => e.op === 'badPublicity'));
+  if (leak && g.credits >= 6) return leak;
   if (install('flak-vest') && (g.heat > 0 || v.turnNumber > 6)) return install('flak-vest')!;
   const freeRam = ramLimit(v) - ramUsed(v);
   const allCovered = covers('wall') && covers('cipher') && covers('hunter');
@@ -412,11 +442,14 @@ function ghostRun(v: GameState, legal: Action[]): Action {
     const ice = currentIce(v)!.card;
     const d = cardOf(ice);
     const must = mustBreak(v, ice, run.broken);
+    // virus counters lower the ICE before paying to boost
+    const termite = pick(legal, 'spendVirus');
+    if (termite && must.length && g.programs.some((p) => canBreak(p, ice) && breakerStrength(v, p) < iceStrength(v, ice))) return termite;
     const act = (plan: { card: CardId }, sub: number): Action | undefined =>
       pick(legal, 'boost', (a) => a.card === plan.card) ?? pick(legal, 'break', (a) => a.card === plan.card && a.sub === sub);
     if (must.length) {
       const plan = breakPlan(v, ice, must.length);
-      if (plan && plan.cost <= g.credits) {
+      if (plan && plan.cost <= available(v, 'ghost', 'break')) {
         const a = act(plan, must[0]);
         if (a) return a;
       }
@@ -425,7 +458,7 @@ function ghostRun(v: GameState, legal: Action[]): Action {
       const hits = must.filter((i) => d.subs![i].op === 'damage' && (firstEnd < 0 || i < firstEnd));
       const hurt = hits.reduce((n, i) => n + (d.subs![i] as { n: number }).n, 0);
       const soft = breakPlan(v, ice, hits.length);
-      if (hits.length && soft && soft.cost <= g.credits && hurt >= g.hand.length) {
+      if (hits.length && soft && soft.cost <= available(v, 'ghost', 'break') && hurt >= g.hand.length) {
         const a = act(soft, hits[0]);
         if (a) return a;
       }
@@ -448,7 +481,7 @@ function ghostRun(v: GameState, legal: Action[]): Action {
     const p = pathCost(v, run.node, run.pos - 1, run.noActivate);
     const risk = p.damage + (p.unknown ? faceCheckDamage(v) : 0);
     const trap = run.instead ? 0 : trapRisk(v, node);
-    if (p.blocked || p.cost > g.credits || g.hand.length < risk || g.hand.length - risk < trap) return pick(legal, 'jackOut')!;
+    if (p.blocked || p.cost > available(v, 'ghost', 'break') || g.hand.length < risk || g.hand.length - risk < trap) return pick(legal, 'jackOut')!;
     return pick(legal, 'continue')!;
   }
   // access
@@ -464,10 +497,26 @@ function ghostRun(v: GameState, legal: Action[]): Action {
 
 // ---------------------------------------------------------------------------
 
+/** How hard to push a trace, or how much link to buy. */
+function traceChoice(v: GameState, side: Side, legal: Action[]): Action {
+  const t = v.trace!;
+  const most = legal.length - 1;
+  if (side === 'corp') {
+    // win it outright if the Ghost cannot match, without emptying the bank
+    const target = link(v) + available(v, 'ghost', 'trace') + 1 - t.base;
+    const n = target <= 0 ? 0 : target <= Math.min(most, Math.max(0, v.corp.credits - 2), 6) ? target : 0;
+    return { type: 'traceBoost', n };
+  }
+  // the Ghost is offered exactly up to what it takes to evade
+  const need = most;
+  return { type: 'traceBoost', n: need <= 4 && need <= available(v, 'ghost', 'trace') ? need : 0 };
+}
+
 /** Choose an action for whoever must act in this view. */
 export function chooseAction(v: GameState): Action {
   const side = actor(v) as Side;
   const legal = legalActions(v);
+  if (v.trace) return traceChoice(v, side, legal);
   if (v.phase === 'mulligan') {
     const hand = v[side].hand.map(cardOf);
     const bad =

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import rulesRaw from '../../reference/RULES.md?raw';
 import { apply } from '../engine/actions';
-import { cardOf, defaultSetup, deckList, fullText, isHidden, poolOf, subText } from '../engine/cards';
-import { builtInPack, parsePack } from '../engine/pack';
+import { cardOf, defaultSetup, deckList, fullText, identitiesFor, isHidden, poolOf, subText } from '../engine/cards';
+import { builtInPack, deckPool, deckProblems, exportPack, parsePack } from '../engine/pack';
 import { legalActions } from '../engine/legal';
-import { actor, breakerStrength, currentIce, findInstalled, iceStrength, maxHand, newGame, nodeName, points, ramLimit, ramUsed } from '../engine/state';
+import { actor, breakerStrength, currentIce, findInstalled, iceStrength, link, maxHand, newGame, nodeName, points, ramLimit, ramUsed } from '../engine/state';
 import { eventText, viewFor } from '../engine/view';
 import { CYCLES, POINTS_TO_WIN, type Action, type CardDef, type CardId, type GameSetup, type GameState, type Installed, type NodeState, type Side } from '../engine/types';
 import { botStep } from '../bots/driver';
@@ -58,6 +58,13 @@ function NewGame(props: { canContinue: boolean; onContinue: () => void; onStart:
   const [keys, setKeys] = useState({ anthropic: loadKey('anthropic'), openrouter: loadKey('openrouter') });
   const [pack, setPack] = useState<GameSetup | null>(() => loadPackSetup());
   const [packSheet, setPackSheet] = useState(false);
+  const [deckSheet, setDeckSheet] = useState(false);
+  const setup = pack ?? defaultSetup();
+  const [myId, setMyId] = useState('');
+  const [botId, setBotId] = useState('random');
+  const foeSide: Side = side === 'corp' ? 'ghost' : 'corp';
+  const mine = identitiesFor(setup, side);
+  const theirs = identitiesFor(setup, foeSide);
   const choosePack = (p: GameSetup | null) => {
     setPack(p);
     savePackSetup(p);
@@ -67,7 +74,10 @@ function NewGame(props: { canContinue: boolean; onContinue: () => void; onStart:
       saveKey('openrouter', keys.openrouter);
       saveKey('anthropic', keys.anthropic);
     }
-    props.onStart(newGame({ seed: `${Date.now()}-${Math.random()}`, human: side, setup: pack ?? undefined }));
+    const myPick = mine.find((d) => d.id === myId)?.id ?? setup.identities[side];
+    const botPick = botId === 'random' ? theirs[Math.floor(Math.random() * theirs.length)]?.id : botId;
+    const identities = { [side]: myPick, [foeSide]: botPick ?? setup.identities[foeSide] } as Record<Side, string>;
+    props.onStart(newGame({ seed: `${Date.now()}-${Math.random()}`, human: side, setup: pack ?? undefined, identities }));
   };
   return (
     <main class="newgame">
@@ -99,6 +109,27 @@ function NewGame(props: { canContinue: boolean; onContinue: () => void; onStart:
           <span class="muted small">(optional)</span>
         </label>
         {gm && <ProviderFields settings={props.gmSettings} setSettings={props.setGmSettings} builtIn={builtIn} keys={keys} onKey={(p, k) => setKeys((x) => ({ ...x, [p]: k }))} />}
+        <label class="field">
+          <span>🪪 Your identity</span>
+          <select value={mine.some((d) => d.id === myId) ? myId : setup.identities[side]} onChange={(e) => setMyId((e.target as HTMLSelectElement).value)}>
+            {mine.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}: {d.text.replace(/^Identity\.\s*/, '')}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label class="field">
+          <span>🤖 Bot's identity</span>
+          <select value={theirs.some((d) => d.id === botId) ? botId : 'random'} onChange={(e) => setBotId((e.target as HTMLSelectElement).value)}>
+            <option value="random">Random</option>
+            {theirs.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}: {d.text.replace(/^Identity\.\s*/, '')}
+              </option>
+            ))}
+          </select>
+        </label>
         <div class="row packrow">
           <span>
             🃏 Cards: <b>{pack?.packName ?? 'Breachline core set'}</b>{' '}
@@ -106,9 +137,14 @@ function NewGame(props: { canContinue: boolean; onContinue: () => void; onStart:
               ({deckList('corp', pack ?? defaultSetup()).length} Corp, {deckList('ghost', pack ?? defaultSetup()).length} Ghost)
             </span>
           </span>
-          <button class="small" onClick={() => setPackSheet(true)}>
-            Change
-          </button>
+          <span class="row">
+            <button class="small" onClick={() => setDeckSheet(true)}>
+              Edit decks
+            </button>
+            <button class="small" onClick={() => setPackSheet(true)}>
+              Change
+            </button>
+          </span>
         </div>
         <button class="primary wide" onClick={start}>
           ⚡ Start a new game
@@ -119,6 +155,7 @@ function NewGame(props: { canContinue: boolean; onContinue: () => void; onStart:
       </section>
       {help && <HelpSheet setup={pack ?? defaultSetup()} close={() => setHelp(false)} />}
       {packSheet && <PackSheet current={pack} choose={choosePack} close={() => setPackSheet(false)} />}
+      {deckSheet && <DeckSheet setup={setup} save={choosePack} close={() => setDeckSheet(false)} />}
     </main>
   );
 }
@@ -211,7 +248,7 @@ function Game(props: {
         </button>
       </div>
 
-      <Scoreboard v={v} me={me} who={who} />
+      <Scoreboard v={v} me={me} who={who} open={open} />
 
       <div class="layout">
         <div class="col main">
@@ -237,7 +274,7 @@ function Game(props: {
             <header class="row">
               <b>🕶️ Ghost rig</b>
               <span class="muted small">
-                RAM {ramUsed(v)}/{ramLimit(v)} · heat {v.ghost.heat}
+                RAM {ramUsed(v)}/{ramLimit(v)} · link {link(v)} · heat {v.ghost.heat}
               </span>
             </header>
             <Rig v={v} open={open} hot={hot} onPile={(title, cards) => setSheet({ kind: 'pile', title, cards })} />
@@ -301,7 +338,7 @@ function Pips({ n, of }: { n: number; of: number }) {
   );
 }
 
-function Scoreboard({ v, me, who }: { v: GameState; me: Side; who: Side | null }) {
+function Scoreboard({ v, me, who, open }: { v: GameState; me: Side; who: Side | null; open?: (c: CardId) => void }) {
   const box = (side: Side) => {
     const p = v[side];
     return (
@@ -315,11 +352,16 @@ function Scoreboard({ v, me, who }: { v: GameState; me: Side; who: Side | null }
             <span class="of">/{POINTS_TO_WIN}</span>
           </span>
         </div>
+        <button class="linkish small ident" onClick={() => open?.(p.identity)} title="identity">
+          🪪 {cardOf(p.identity).name}
+        </button>
         <div class="stats">
           <span title="credits">💰 {p.credits}</span>
           <span title="cards in hand">✋ {p.hand.length}</span>
           <span title="deck">📚 {p.deck.length}</span>
           {side === 'ghost' && <span class={v.ghost.heat ? 'heat' : ''}>🔥 {v.ghost.heat}</span>}
+          {side === 'ghost' && <span title="link (against traces)">📶 {link(v)}</span>}
+          {side === 'corp' && v.corp.badPublicity > 0 && <span title="bad publicity: the Ghost gets this many extra credits on every run">📰 {v.corp.badPublicity}</span>}
           {side === 'ghost' && v.ghost.core > 0 && <span title="core damage: maximum hand size is lowered by this much">🧠 −{v.ghost.core}</span>}
           {v.turn === side && v.phase !== 'gameOver' && v.phase !== 'mulligan' && <Pips n={p.cycles} of={CYCLES[side]} />}
         </div>
@@ -338,7 +380,13 @@ function Prompt({ v, me, myMove, who }: { v: GameState; me: Side; myMove: boolea
   if (v.phase === 'gameOver') return null;
   let text = '';
   if (!myMove) text = `The ${sideName(who!)} is thinking…`;
-  else if (v.phase === 'mulligan') text = 'Opening hand: keep it, or shuffle it back for 5 new cards (once).';
+  else if (v.trace) {
+    const t = v.trace;
+    text =
+      t.corpBoost === null
+        ? `${t.source}: trace ${t.base} against the Ghost's link ${link(v)}. Pay to raise the trace; the Ghost answers after you.`
+        : `${t.source}: the trace is ${t.base + t.corpBoost} against your link ${link(v)}. Pay to raise your link to match it, or let it land.`;
+  } else if (v.phase === 'mulligan') text = 'Opening hand: keep it, or shuffle it back for 5 new cards (once).';
   else if (v.phase === 'discard') text = `Discard down to ${maxHand(v, me)} cards: tap a card in your hand.`;
   else if (v.phase === 'run' && v.run) {
     const ice = currentIce(v);
@@ -374,6 +422,7 @@ function Chip({ inst, v, open, hot, current }: { inst: Installed; v: GameState; 
       <span class="small muted">
         {!hidden && d.type === 'ice' && `${d.subtype} · str ${iceStrength(v, inst.card)} · ${d.cost}¢`}
         {inst.dev > 0 && <b class="dev"> ●{inst.dev}</b>}
+        {v.corp.recurring[inst.card] !== undefined && ` 💳 ${v.corp.recurring[inst.card]}`}
       </span>
     </button>
   );
@@ -480,6 +529,11 @@ function Rig(props: { v: GameState; open: (c: CardId) => void; hot: (c: CardId) 
           {cardOf(c).breaker && (
             <span class="small muted">
               {cardOf(c).breaker!.breaks} · str {breakerStrength(props.v, c)}
+            </span>
+          )}
+          {(g.hosted[c] || g.virus[c] || g.recurring[c] !== undefined) && (
+            <span class="small muted">
+              {g.hosted[c] && `on ${cardOf(g.hosted[c]).name}`} {g.virus[c] ? `🦠 ${g.virus[c]}` : ''} {g.recurring[c] !== undefined ? `💳 ${g.recurring[c]} recurring` : ''}
             </span>
           )}
         </button>
@@ -819,6 +873,116 @@ function PackSheet({ current, choose, close }: { current: GameSetup | null; choo
             {errors.length > 40 && <p class="small">…and {errors.length - 40} more.</p>}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Deck builder
+// ---------------------------------------------------------------------------
+
+function DeckSheet({ setup, save, close }: { setup: GameSetup; save: (p: GameSetup) => void; close: () => void }) {
+  const [tab, setTab] = useState<Side>('ghost');
+  const [decks, setDecks] = useState<Record<Side, Record<string, number>>>(() => structuredClone(setup.decks));
+  const [name, setName] = useState(setup.packName ?? 'My decks');
+  const [saved, setSaved] = useState('');
+  const pool = deckPool(setup, tab);
+  const { errors, warnings } = deckProblems(decks, setup.cards);
+  const size = (side: Side) => Object.values(decks[side]).reduce((a, b) => a + b, 0);
+  const pts = Object.entries(decks.corp).reduce((n, [id, k]) => n + (cardOf(`${id}#1`).points ?? 0) * k, 0);
+  const set = (id: string, n: number) => {
+    setSaved('');
+    setDecks((d) => {
+      const next = structuredClone(d);
+      if (n <= 0) delete next[tab][id];
+      else next[tab][id] = Math.min(n, 9);
+      return next;
+    });
+  };
+  const result = (): GameSetup => ({ ...setup, packName: name.trim() || 'My decks', decks });
+  const types = [...new Set(pool.map((d) => d.type))];
+  return (
+    <div class="overlay" onClick={close}>
+      <div class="sheet tall" role="dialog" aria-label="Deck builder" onClick={(e) => e.stopPropagation()}>
+        <header>
+          <div class="tabs" role="tablist">
+            {(['ghost', 'corp'] as const).map((t) => (
+              <button key={t} role="tab" aria-selected={tab === t} class={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
+                {t === 'ghost' ? `🕶️ Ghost (${size('ghost')})` : `🏙️ Corp (${size('corp')})`}
+              </button>
+            ))}
+          </div>
+          <button class="ghost" onClick={close} aria-label="Close">
+            ✕
+          </button>
+        </header>
+        <p class="small muted">
+          {tab === 'corp' ? `${pts} project points (7 to win). ` : ''}Decks need 15 to 120 cards; up to 9 copies of a card. Identities are picked when a game starts.
+        </p>
+        <div class="deckgrid">
+          {types.map((type) => (
+            <div key={type}>
+              <h4 class="small muted">{type}</h4>
+              {pool
+                .filter((d) => d.type === type)
+                .map((d) => {
+                  const n = decks[tab][d.id] ?? 0;
+                  return (
+                    <div key={d.id} class={`deckrow ${n ? '' : 'off'}`}>
+                      <span title={fullText(d)}>
+                        {icon(d)} {d.name} <span class="muted small">{stats(d).join(' · ')}</span>
+                      </span>
+                      <span class="stepper">
+                        <button aria-label={`fewer ${d.name}`} disabled={!n} onClick={() => set(d.id, n - 1)}>
+                          −
+                        </button>
+                        <b>{n}</b>
+                        <button aria-label={`more ${d.name}`} disabled={n >= 9} onClick={() => set(d.id, n + 1)}>
+                          +
+                        </button>
+                      </span>
+                    </div>
+                  );
+                })}
+            </div>
+          ))}
+        </div>
+        {errors.length > 0 && (
+          <ul class="small errors">
+            {errors.map((e, i) => (
+              <li key={i}>{e}</li>
+            ))}
+          </ul>
+        )}
+        {warnings.length > 0 && (
+          <ul class="small warn">
+            {warnings.map((w, i) => (
+              <li key={i}>⚠️ {w}</li>
+            ))}
+          </ul>
+        )}
+        <label class="field">
+          <span>Name</span>
+          <input value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
+        </label>
+        <div class="row wrap">
+          <button
+            class="primary"
+            disabled={errors.length > 0}
+            onClick={() => {
+              save(result());
+              setSaved('Saved. New games use these decks.');
+            }}
+          >
+            💾 Use these decks
+          </button>
+          <button onClick={() => setDecks(structuredClone(setup.decks))}>↩️ Undo changes</button>
+          <button disabled={errors.length > 0} onClick={() => download(`${(name.trim() || 'my-decks').toLowerCase().replace(/[^a-z0-9]+/g, '-')}.json`, JSON.stringify(exportPack(result()), null, 2))}>
+            ⬇️ Export as a pack file
+          </button>
+        </div>
+        {saved && <p class="ok">{saved}</p>}
       </div>
     </div>
   );

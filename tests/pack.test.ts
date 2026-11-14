@@ -6,7 +6,7 @@ import { apply } from '../src/engine/actions';
 import { cardOf, deckList, defaultDeck, nameOf } from '../src/engine/cards';
 import { violations } from '../src/engine/invariants';
 import { legalActions } from '../src/engine/legal';
-import { builtInPack, loadPack, parsePack } from '../src/engine/pack';
+import { builtInPack, deckPool, deckProblems, exportPack, loadPack, parsePack } from '../src/engine/pack';
 import { newGame, nodeOf } from '../src/engine/state';
 import type { GameSetup } from '../src/engine/types';
 import { viewFor } from '../src/engine/view';
@@ -83,6 +83,21 @@ describe('loading packs', () => {
     expect(errorsOf({ name: 'p', cards: [], decks: { ghost: { crowbar: 3 } } })).toMatch(/needs at least 15/);
     expect(errorsOf({ name: 'p', cards: [{ id: 'w', name: 'W', side: 'corp', type: 'ice', copies: 1, cost: 1, text: '' }] })).toMatch(/subtype.*\n.*strength.*\n.*subroutine/);
   });
+  it('edited decks export as a pack that loads back to the same decks', () => {
+    const setup = setupOf(sample);
+    const edited = { ...setup, packName: 'Edited', decks: structuredClone(setup.decks) };
+    const pry = setup.cards.find((c) => c.name === 'Pry Bar')!.id;
+    edited.decks.ghost[pry] = 4;
+    delete edited.decks.ghost.crowbar;
+    expect(deckProblems(edited.decks, edited.cards).errors).toEqual([]);
+    const back = setupOf(JSON.parse(JSON.stringify(exportPack(edited))));
+    expect(counts(back, 'ghost')).toEqual(counts(edited, 'ghost'));
+    expect(counts(back, 'corp')).toEqual(counts(edited, 'corp'));
+    // the deck pool offers replacements, not the cards they replace, and no identities
+    const pool = deckPool(setup, 'ghost');
+    expect(pool.filter((c) => c.name === 'Fast Money')).toHaveLength(1);
+    expect(pool.some((c) => c.type === 'identity')).toBe(false);
+  });
   it('warns about decks that cannot be won on points', () => {
     const r = loadPack({ name: 'p', cards: [], decks: { corp: { tripwire: 3, bulkhead: 3, riddlegate: 3, 'shell-company': 3, 'quarterly-windfall': 3 } } });
     expect(r.ok && r.warnings.join(' ')).toMatch(/project points/);
@@ -92,7 +107,7 @@ describe('loading packs', () => {
 describe('playing with a pack', () => {
   const setup = setupOf(sample);
   it('custom cards follow their data: Market Stall, Smash and Grab, Toll Booth', () => {
-    let s = newGame({ seed: 5, human: 'ghost', setup });
+    let s = newGame({ seed: 5, human: 'ghost', setup, identities: { ghost: 'halcyon' } });
     s = act(act(s, { type: 'keep' }), { type: 'keep' });
     s = ghostTurn(structuredClone(s), 3);
     const id = (name: string) => setup.cards.find((c) => c.name === name)!.id;

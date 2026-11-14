@@ -5,7 +5,7 @@ export type CardId = string; // "<defId>#<n>", or "?…" for a card hidden from 
 export type NodeId = string; // 'command' | 'mainframe' | 'dump' | 'site<n>'
 
 export type IceType = 'wall' | 'cipher' | 'hunter';
-export type CardType = 'project' | 'ice' | 'asset' | 'upgrade' | 'directive' | 'program' | 'gear' | 'contact' | 'stunt' | 'hidden';
+export type CardType = 'project' | 'ice' | 'asset' | 'upgrade' | 'directive' | 'program' | 'gear' | 'contact' | 'stunt' | 'identity' | 'hidden';
 export type DamageKind = 'net' | 'meat' | 'core';
 export const DAMAGE_KINDS: DamageKind[] = ['net', 'meat', 'core'];
 
@@ -35,8 +35,12 @@ export type Effect =
   | { op: 'develop'; n: number }
   /** shuffle the Dump into the Mainframe */
   | { op: 'recycleDump' }
-  /** the Ghost makes a run; `instead` replaces accessing cards when it succeeds */
-  | { op: 'run'; node: 'command' | 'mainframe' | 'dump' | 'any'; extraAccess?: number; noActivate?: boolean; instead?: Effect[] }
+  /** the Ghost makes a run; `instead` replaces accessing cards when it succeeds; `bypass`: the first N ICE encountered are bypassed */
+  | { op: 'run'; node: 'command' | 'mainframe' | 'dump' | 'any'; extraAccess?: number; noActivate?: boolean; bypass?: number; instead?: Effect[] }
+  /** trace n: the Corp may pay to raise n, then the Ghost may pay to raise their link; if the trace ends higher, `success` resolves */
+  | { op: 'trace'; n: number; success: Effect[] }
+  | { op: 'badPublicity'; n: number }
+  | { op: 'clearBadPublicity'; n: number }
   /** targets a node: the Ghost looks at every facedown card in or protecting it */
   | { op: 'reveal' }
   /** targets a card of one of these types in the Scrapheap: return it to hand */
@@ -44,6 +48,12 @@ export type Effect =
 
 /** ICE subroutines are effects. */
 export type SubOp = Effect;
+
+/** What recurring credits may pay for. */
+export type RecurringUse = 'breakers' | 'activateIce' | 'trace' | 'any';
+
+/** Why a side is paying; recurring and bad publicity credits only cover some payments. */
+export type Purpose = 'install' | 'play' | 'develop' | 'activate' | 'activateIce' | 'boost' | 'break' | 'steal' | 'trashAccess' | 'trace' | 'other';
 
 export type PlayCondition = 'ghostHasHeat' | 'ghostRanLastTurn';
 
@@ -113,6 +123,23 @@ export interface CardDef {
   // program
   ram?: number;
   breaker?: Breaker;
+  /** recurring credits: refilled to n at the start of the owner's turn while installed (Corp: while active) */
+  recurring?: { n: number; for: RecurringUse };
+  /** Ghost: link strength against traces */
+  link?: number;
+  /** virus program: place 1 virus counter on it after each successful run on these nodes */
+  virusOn?: 'central' | 'mainframe' | 'command' | 'dump' | 'any';
+  /** virus program: when accessing the Mainframe, 1 more card for every N virus counters on it */
+  virusAccess?: number;
+  /** virus program: spend 1 virus counter while encountering ICE: that ICE gets -1 strength for this encounter */
+  virusSpend?: boolean;
+  /** gear: can host up to `max` programs; hosted programs use no RAM, and hosted breakers get +breakerStrength */
+  host?: { max: number; breakerStrength?: number };
+  // identity
+  /** Corp identity: effects whenever the Corp scores a project */
+  onCorpScore?: Effect[];
+  /** Corp identity: effects whenever the Ghost steals a project */
+  onSteal?: Effect[];
 }
 
 /** A set of custom cards, loaded from JSON. See reference/CARD_PACKS.md. */
@@ -129,6 +156,8 @@ export interface CardPack {
 /** Which cards this game uses. Saved with the game so it replays and resumes exactly. */
 export interface GameSetup {
   packName: string | null;
+  /** identity card ids, one per side */
+  identities: Record<Side, string>;
   /** custom card definitions, with ids already namespaced */
   cards: CardDef[];
   decks: Record<Side, Record<string, number>>;
@@ -152,7 +181,11 @@ export interface NodeState {
 }
 
 export interface CorpState {
+  identity: CardId;
   credits: number;
+  badPublicity: number;
+  /** recurring credits left this turn, by card */
+  recurring: Record<CardId, number>;
   cycles: number;
   hand: CardId[];
   /** the Mainframe; the last entry is the top card */
@@ -168,7 +201,13 @@ export interface CorpState {
 }
 
 export interface GhostState {
+  identity: CardId;
   credits: number;
+  recurring: Record<CardId, number>;
+  /** virus counters, by program */
+  virus: Record<CardId, number>;
+  /** hosted program -> the gear hosting it */
+  hosted: Record<CardId, CardId>;
   cycles: number;
   hand: CardId[];
   deck: CardId[];
@@ -201,9 +240,27 @@ export interface RunState {
   accessing: CardId | null;
   noActivate: boolean;
   extraAccess: number;
+  /** ICE still to bypass on this run */
+  bypass: number;
+  /** strength removed from the current ICE for this encounter (virus counters) */
+  iceMinus: number;
+  /** bad publicity credits for this run: spent first, gone when the run ends */
+  bpCredits: number;
   /** effects that replace accessing cards, and the card they come from */
   instead: Effect[] | null;
   source: string | null;
+}
+
+/** A trace waiting for the Corp's and then the Ghost's boost. */
+export interface TraceState {
+  base: number;
+  corpBoost: number | null;
+  success: Effect[];
+  source: string;
+  owner: Side;
+  /** effects still to resolve after the trace, and what to resume after them */
+  rest: Effect[];
+  then: 'subs' | 'none';
 }
 
 export type Phase = 'mulligan' | 'action' | 'discard' | 'run' | 'gameOver';
@@ -232,6 +289,7 @@ export interface GameState {
   corp: CorpState;
   ghost: GhostState;
   run: RunState | null;
+  trace: TraceState | null;
   /** this turn */
   flags: { successfulRun: boolean; prevented: Record<DamageKind, number> };
   ghostSuccessLastTurn: boolean;
@@ -246,7 +304,7 @@ export type Action =
   | { type: 'mulligan' }
   | { type: 'credit' }
   | { type: 'draw' }
-  | { type: 'install'; card: CardId; node?: NodeId | 'new' }
+  | { type: 'install'; card: CardId; node?: NodeId | 'new'; host?: CardId }
   | { type: 'play'; card: CardId; node?: NodeId; target?: CardId }
   | { type: 'develop'; card: CardId }
   | { type: 'score'; card: CardId }
@@ -268,6 +326,9 @@ export type Action =
   | { type: 'leave' }
   | { type: 'chooseTrash'; card: CardId }
   | { type: 'discard'; card: CardId }
+  | { type: 'traceBoost'; n: number }
+  | { type: 'spendVirus'; card: CardId }
+  | { type: 'purge' }
   | { type: 'endTurn' };
 
 export type Result = { ok: true; state: GameState } | { ok: false; error: string };

@@ -5,7 +5,7 @@ A single-player cyber-heist card game in the browser. You play the **Ghost** (a 
 Breachline is an original game with its own cards and rules. It is in the same genre as asymmetric hacking card games, but it is not a port of any of them. `SPEC.md` explains that decision.
 
 - Rules: `reference/RULES.md` (also in the app under 📖)
-- Cards: `data/cards.json` (45 designs; 52-card Corp deck, 41-card Ghost deck)
+- Cards: `data/cards.json` (4 identities and 57 designs; 61-card Corp deck, 51-card Ghost deck; decks can be edited in the app)
 - Your own cards: load a card pack from the start screen; the format is in `reference/CARD_PACKS.md`, with a sample in `packs/sample-pack.json`
 - Decisions and scope: `SPEC.md`
 - What is left: `HANDOFF.md`
@@ -105,9 +105,18 @@ Where the rules or a card could be read two ways, this is what the engine does.
 25. **Choke Point** raises strength only while active. If the Corp activates it while the Ghost approaches ICE in that node, the boost applies to that ICE's encounter.
 26. **Watch Desk** gives heat only when activated during a run, not when activated on the Corp's turn.
 27. **Running out of money mid-approach.** If the Corp spends credits on another card while the Ghost approaches inactive ICE and can no longer afford that ICE, the Ghost slips past it.
+28. **Identities** are chosen when a game starts (the bot's at random unless you pick it), are public, never count as cards in a deck, and work all game. Helix Dynamics pays on every score, including projects scored by other effects. Vigil Systems' heat comes after the steal, so a steal that wins the game ends it first.
+29. **Traces.** The Corp boosts first, knowing the Ghost's link; then the Ghost. Success needs the trace to end strictly higher than the link. The Corp may pay up to 15; the Ghost is offered only up to the amount that matches the trace (more would change nothing). Bad publicity credits can pay for link during a run.
+30. **Bad publicity credits** can pay any cost during that run (breakers, trash costs, steal costs, link), but not effects that make the Ghost "lose" credits (Riddlegate, Lockout Relay), since losing is not paying.
+31. **Payment order**: matching recurring credits first, then bad publicity credits, then the credit pool. The engine pays automatically in that order; it is never worse for the payer.
+32. **Recurring credits** refill to their number at the start of the owner's turn; they do not accumulate. A Corp card's fill when activated, and a Ghost card's when installed, so they can be used at once.
+33. **Virus counters** are placed when the run succeeds, before any access, so Rot Crawler's second counter already counts on that run. Termite Script can spend several counters in one encounter; ICE strength never goes below 0. A purge needs all 3 Corp cycles, so it must be the first thing the Corp does in its turn.
+34. **Bypass** uses up on the first ICE the Ghost would encounter, including ICE the Corp activates on approach. It ends that encounter at once: the Ghost may then jack out or continue as after passing ICE.
+35. **Hosting.** Installing onto Exo Frame is a choice offered alongside a normal install. A hosted program uses no RAM and stays hosted until it leaves play; if the host is trashed, the hosted program is trashed too.
+36. **Press Leak** and Records Request read "your last turn" as the Ghost's most recent completed turn, the same as Lockdown Audit.
 
 ## Status
 
-- Engine, all 45 card designs, upgrades, three damage kinds, Corp activation during runs, custom card packs, both bots, UI with save/resume, the Operator, Docker and the Pages workflow are done.
-- 129 tests pass: every rule, one test block per card (with a check that no card is untested), hidden-information and Operator-leak tests, card pack checks and 40 bot games with the sample pack, random-play fuzzing, and 500 seeded bot-vs-bot games with invariant checks after every action.
+- Engine, 4 identities and 57 card designs, upgrades, three damage kinds, Corp activation during runs, traces and link, bad publicity, recurring credits, viruses and purging, bypass, hosting, an in-app deck builder, custom card packs, both bots, UI with save/resume, the Operator, Docker and the Pages workflow are done.
+- 153 tests pass: every rule, one test block per card (with a check that no card is untested), hidden-information and Operator-leak tests, card pack checks and 40 bot games with the sample pack, random-play fuzzing, and 500 seeded bot-vs-bot games with invariant checks after every action.
 - Not verified here: a live Operator call (no API key in the build environment) and the GitHub Pages deploy (it needs Pages switched on in the repo settings).

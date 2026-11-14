@@ -5,7 +5,8 @@ import { defId } from '../src/engine/cards';
 import { violations } from '../src/engine/invariants';
 import { legalActions } from '../src/engine/legal';
 import { newGame, nodeOf } from '../src/engine/state';
-import type { Action, CardId, GameState, NodeId, Side } from '../src/engine/types';
+import { loadPack } from '../src/engine/pack';
+import type { Action, CardId, GameSetup, GameState, NodeId, Side } from '../src/engine/types';
 
 /** Apply one action exactly. */
 export function actRaw(s: GameState, a: Action): GameState {
@@ -34,9 +35,23 @@ export function rejects(s: GameState, a: Action): string {
   return r.ok ? '' : r.error;
 }
 
+/**
+ * The built-in decks with identities that do nothing, so each test sees only the cards it sets up.
+ * Tests of the real identities pass them to newGame themselves.
+ */
+const plain = loadPack({
+  name: 'test identities',
+  cards: [
+    { id: 'plain-corp', name: 'Plain Corp', side: 'corp', type: 'identity', copies: 1, text: 'Identity. No ability.' },
+    { id: 'plain-ghost', name: 'Plain Ghost', side: 'ghost', type: 'identity', copies: 1, link: 0, text: 'Identity. Link 0. No ability.' },
+  ],
+});
+if (!plain.ok) throw new Error(plain.errors.join('; '));
+export const PLAIN: GameSetup = plain.setup;
+
 /** A game past the mulligans: Corp's turn 1, with empty hands so tests control every card. */
-export function blank(human: Side = 'ghost'): GameState {
-  let s = newGame({ seed: 42, human });
+export function blank(human: Side = 'ghost', identities?: Partial<Record<Side, string>>): GameState {
+  let s = newGame({ seed: 42, human, setup: PLAIN, identities });
   s = act(s, { type: 'keep' });
   s = act(s, { type: 'keep' });
   s = structuredClone(s);
@@ -86,7 +101,7 @@ export function upgrade(s: GameState, node: NodeId, def: string, active = false)
 export function rig(s: GameState, ...defs: string[]): CardId[] {
   return defs.map((d) => {
     const c = take(s, d);
-    const zone = ['ram-brick', 'padded-rig', 'burner-phone', 'flak-vest'].includes(d) ? s.ghost.gear : ['street-fence', 'safehouse'].includes(d) ? s.ghost.contacts : s.ghost.programs;
+    const zone = ['ram-brick', 'padded-rig', 'burner-phone', 'flak-vest', 'exo-frame', 'hot-cache', 'signal-booster'].includes(d) ? s.ghost.gear : ['street-fence', 'safehouse'].includes(d) ? s.ghost.contacts : s.ghost.programs;
     zone.push(c);
     return c;
   });

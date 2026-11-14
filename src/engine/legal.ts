@@ -1,6 +1,6 @@
 // The single source of truth for what may be done. apply() accepts exactly these actions.
 import { cardOf, ensureCards, targetedEffect } from './cards';
-import { actor, breakerStrength, canBreak, canDevelop, currentIce, iceStrength, isSite, ramLimit, ramUsed } from './state';
+import { actor, available, breakerStrength, canBreak, canDevelop, currentIce, hostsWithRoom, iceStrength, isSite, link, ramLimit, ramUsed } from './state';
 import { MAX_ICE, MAX_SITES, type Action, type CardDef, type CardId, type GameState, type NodeId, type PlayCondition } from './types';
 
 export function conditionHolds(s: GameState, c: PlayCondition | undefined): boolean {
@@ -35,7 +35,7 @@ export function activatable(s: GameState): CardId[] {
   for (const n of s.corp.nodes)
     for (const inst of [...(n.root ? [n.root] : []), ...n.upgrades]) {
       const d = cardOf(inst.card);
-      if ((d.type === 'asset' || d.type === 'upgrade') && !d.trap && !inst.active && s.corp.credits >= (d.cost ?? 0)) out.push(inst.card);
+      if ((d.type === 'asset' || d.type === 'upgrade') && !d.trap && !inst.active && available(s, 'corp', 'activate') >= (d.cost ?? 0)) out.push(inst.card);
     }
   return out;
 }
@@ -81,7 +81,7 @@ function corpTurn(s: GameState): Action[] {
   for (const card of c.hand) {
     const d = cardOf(card);
     if (d.type === 'ice') {
-      for (const n of c.nodes) if (n.ice.length < MAX_ICE && c.credits >= n.ice.length) out.push({ type: 'install', card, node: n.id });
+      for (const n of c.nodes) if (n.ice.length < MAX_ICE && available(s, 'corp', 'install') >= n.ice.length) out.push({ type: 'install', card, node: n.id });
       if (canOpenSite(s)) out.push({ type: 'install', card, node: 'new' });
     } else if (d.type === 'project' || d.type === 'asset') {
       for (const n of sites(s)) out.push({ type: 'install', card, node: n.id });
@@ -89,10 +89,12 @@ function corpTurn(s: GameState): Action[] {
     } else if (d.type === 'upgrade') {
       for (const n of c.nodes) out.push({ type: 'install', card, node: n.id });
       if (canOpenSite(s)) out.push({ type: 'install', card, node: 'new' });
-    } else if (d.type === 'directive' && c.credits >= (d.cost ?? 0) && directiveReady(s, card)) out.push(...playOptions(s, card, d));
+    } else if (d.type === 'directive' && available(s, 'corp', 'play') >= (d.cost ?? 0) && directiveReady(s, card)) out.push(...playOptions(s, card, d));
   }
-  if (c.credits >= 1) for (const card of developTargets(s)) out.push({ type: 'develop', card });
-  if (s.ghost.heat > 0 && c.credits >= 2) for (const card of s.ghost.contacts) out.push({ type: 'trashContact', card });
+  if (available(s, 'corp', 'develop') >= 1) for (const card of developTargets(s)) out.push({ type: 'develop', card });
+  if (s.ghost.heat > 0 && available(s, 'corp', 'other') >= 2) for (const card of s.ghost.contacts) out.push({ type: 'trashContact', card });
+  // purging viruses takes the whole turn
+  if (c.cycles >= 3) out.push({ type: 'purge' });
   return out;
 }
 
@@ -104,7 +106,7 @@ export function runTargets(s: GameState): NodeId[] {
 function abilityReady(s: GameState, card: CardId): boolean {
   const a = cardOf(card).ability;
   if (!a) return false;
-  if (a.cycles > s.ghost.cycles || (a.credits ?? 0) > s.ghost.credits || !conditionHolds(s, a.if)) return false;
+  if (a.cycles > s.ghost.cycles || (a.credits ?? 0) > available(s, 'ghost', 'other') || !conditionHolds(s, a.if)) return false;
   // an ability that only draws needs cards to draw
   if (a.effects.every((e) => e.op === 'draw') && !s.ghost.deck.length) return false;
   return true;
@@ -124,14 +126,16 @@ function ghostTurn(s: GameState): Action[] {
   if (g.deck.length) out.push({ type: 'draw' });
   for (const card of g.hand) {
     const d = cardOf(card);
-    if (g.credits < (d.cost ?? 0)) continue;
+    const cost = d.type === 'stunt' ? available(s, 'ghost', 'play') : available(s, 'ghost', 'install');
+    if (cost < (d.cost ?? 0)) continue;
     if (d.type === 'program') {
       if (ramUsed(s) + (d.ram ?? 1) <= ramLimit(s)) out.push({ type: 'install', card });
+      for (const host of hostsWithRoom(s)) out.push({ type: 'install', card, host });
     } else if (d.type === 'gear' || d.type === 'contact') out.push({ type: 'install', card });
     else if (d.type === 'stunt' && directiveReady(s, card)) out.push(...playOptions(s, card, d));
   }
   for (const node of runTargets(s)) out.push({ type: 'run', node });
-  if (g.heat > 0 && g.credits >= 2) out.push({ type: 'shedHeat' });
+  if (g.heat > 0 && available(s, 'ghost', 'other') >= 2) out.push({ type: 'shedHeat' });
   for (const card of rig) if ((cardOf(card).ability?.cycles ?? 0) > 0 && abilityReady(s, card)) out.push({ type: 'use', card });
   return out;
 }
@@ -155,13 +159,14 @@ function runActions(s: GameState): Action[] {
         if (!canBreak(card, ice.card)) continue;
         const b = cardOf(card).breaker!;
         if (breakerStrength(s, card) < iceStrength(s, ice.card)) {
-          if (g.credits >= b.boostCost) out.push({ type: 'boost', card });
-        } else if (g.credits >= b.breakCost) {
+          if (available(s, 'ghost', 'boost') >= b.boostCost) out.push({ type: 'boost', card });
+        } else if (available(s, 'ghost', 'break') >= b.breakCost) {
           def.subs!.forEach((_, sub) => {
             if (!run.broken.includes(sub)) out.push({ type: 'break', card, sub });
           });
         }
       }
+      if (iceStrength(s, ice.card) > 0) for (const card of g.programs) if (cardOf(card).virusSpend && (g.virus[card] ?? 0) > 0) out.push({ type: 'spendVirus', card });
       out.push({ type: 'proceed' });
       return out;
     }
@@ -173,21 +178,36 @@ function runActions(s: GameState): Action[] {
       const d = cardOf(run.accessing!);
       if (d.type === 'project') {
         if (!d.stealCost) return [{ type: 'steal' }];
-        return g.credits >= d.stealCost ? [{ type: 'steal' }, { type: 'leave' }] : [{ type: 'leave' }];
+        return available(s, 'ghost', 'steal') >= d.stealCost ? [{ type: 'steal' }, { type: 'leave' }] : [{ type: 'leave' }];
       }
       const out: Action[] = [];
       // only cards with a trash cost can be trashed, and not once they are already in the Dump
-      if (d.trash !== undefined && g.credits >= d.trash && !s.corp.discard.includes(run.accessing!)) out.push({ type: 'trash' });
+      if (d.trash !== undefined && available(s, 'ghost', 'trashAccess') >= d.trash && !s.corp.discard.includes(run.accessing!)) out.push({ type: 'trash' });
       out.push({ type: 'leave' });
       return out;
     }
   }
 }
 
+const TRACE_MAX = 15;
+
+/** The Corp may pay any amount it can (up to 15) to raise the trace; the Ghost only up to what beating it takes. */
+function traceActions(s: GameState, who: 'corp' | 'ghost'): Action[] {
+  const t = s.trace!;
+  if (who === 'corp') {
+    const most = Math.min(TRACE_MAX, available(s, 'corp', 'trace'));
+    return Array.from({ length: most + 1 }, (_, n) => ({ type: 'traceBoost', n }));
+  }
+  const need = Math.max(0, t.base + (t.corpBoost ?? 0) - link(s));
+  const most = Math.min(need, available(s, 'ghost', 'trace'));
+  return Array.from({ length: most + 1 }, (_, n) => ({ type: 'traceBoost', n }));
+}
+
 export function legalActions(s: GameState): Action[] {
   ensureCards(s);
   const who = actor(s);
   if (!who) return [];
+  if (s.trace) return traceActions(s, who);
   if (s.phase === 'mulligan') return [{ type: 'keep' }, { type: 'mulligan' }];
   if (s.phase === 'discard') return s[who].hand.map((card) => ({ type: 'discard', card }));
   if (s.phase === 'run') return runActions(s);

@@ -10,6 +10,8 @@ Breachline is a two-player card game. The **Corp** builds and scores secret proj
 
 ## Setup
 
+Each side picks an **identity**: a card that starts in play, is never in the deck, and whose ability works all game. The Corp's is public, and so is the Ghost's. The Ghost's identity also sets their base **link** (see Traces).
+
 Each side shuffles its own deck, takes 5 credits and draws 5 cards. Each side, Corp first, may take one mulligan (shuffle the hand back and draw 5 new cards). The Corp takes the first turn.
 
 ## The table
@@ -36,6 +38,7 @@ The Corp gets **3 cycles** a turn and the Ghost gets **4**. Every cycle must be 
 - 1 cycle: play a directive, paying its cost
 - 1 cycle and 1 credit: develop an installed project (or an asset that says it can be developed), adding 1 development counter
 - 1 cycle and 2 credits, only while the Ghost has heat: trash one of the Ghost's contacts
+- all 3 cycles (so only with all 3 left): **purge** every virus counter from the Ghost's programs
 
 Without spending a cycle, on its own turn the Corp may:
 
@@ -46,7 +49,7 @@ Without spending a cycle, on its own turn the Corp may:
 
 - 1 cycle: gain 1 credit
 - 1 cycle: draw 1 card
-- 1 cycle: install a program, gear or contact, paying its cost. Programs need free RAM.
+- 1 cycle: install a program, gear or contact, paying its cost. Programs need free RAM, unless they are installed onto a card that can **host** them (the hosted program uses no RAM; if the host is trashed, what it hosts goes with it).
 - 1 cycle: play a stunt, paying its cost
 - 1 cycle: make a run on a node
 - 1 cycle and 2 credits: shed 1 heat
@@ -70,6 +73,26 @@ The Ghost names a node and meets its ICE from the outermost inward.
    - a facedown card the Ghost accessed and left stays known to the Ghost
    - upgrades in the node are accessed after the normal access, and can be trashed for their trash cost
 
+## Traces
+
+Some ICE subroutines and Corp directives say **Trace N**. The Corp first pays any number of credits to raise N. Then the Ghost pays any number to raise their **link** (from their identity and gear). If the trace ends higher than the link, its "if successful" effect happens; a tie goes to the Ghost. The app only offers the Ghost as much as it takes to match the trace.
+
+## Bad publicity
+
+Some Corp cards give the Corp **bad publicity**. At the start of every run, the Ghost gets 1 extra credit for each bad publicity, usable only during that run and spent before their own credits. Whatever is left disappears when the run ends. Some cards remove bad publicity.
+
+## Recurring credits
+
+A card with **recurring credits** refills to its number at the start of its owner's turn (a Corp card only while active; it also fills when installed or activated). They can only pay for what the card says, they are spent before the pool, and unspent ones do not pile up.
+
+## Viruses
+
+**Virus** programs gain virus counters as the Ghost makes successful runs, and get stronger with them. The Corp's answer is to **purge**: it costs the Corp's whole turn (all 3 cycles) and removes every virus counter.
+
+## Bypass
+
+Some Ghost cards **bypass** ICE: when the Ghost would encounter that ICE, they get past it instead, with no subroutines and no breaking. Only ICE that would actually be encountered counts; inactive ICE the Ghost slips past does not use up a bypass.
+
 ## Damage and heat
 
 - **Damage** comes in three kinds. Each makes the Ghost discard that many cards at random from hand, and more damage than cards in hand means the Ghost is flatlined and loses.
@@ -87,6 +110,9 @@ The Ghost names a node and meets its ICE from the outermost inward.
 - Never run facedown ICE or a facedown site with an empty hand. Hunters deal up to 3 damage, and a developed card may be a Decoy Lab (2 damage plus 1 per counter).
 - Count the Corp's credits before you commit to a run. Facedown upgrades and assets can be activated mid-run: a Choke Point makes the ICE stronger than you planned for, a Lockout Relay costs you 3 at the door, and a Watch Desk gives you heat.
 - Core damage is permanent. Synapse Spike costs you a card and hand size for the rest of the game.
+- Link matters against traces. Each point of link is a credit you do not have to pay every time a trace comes at you.
+- Bad publicity is free money on every run: run more often against a Corp that has it.
+- Virus counters snowball. If the Corp spends a whole turn purging, that is a turn it did not score.
 - Heat is how the Corp kills you. Burn Notice deals 1 plus your heat. Shed heat before you pass the turn.
 - The Mainframe is always worth a look; the same top card stays there until the Corp draws it.
 - A project with counters on it is about to be scored. Count: the Corp has 3 cycles a turn.
@@ -96,6 +122,8 @@ The Ghost names a node and meets its ICE from the outermost inward.
 
 - ICE Command and the Mainframe early, then build one well-protected site to score in.
 - Keep enough credits to activate your ICE. Facedown ICE you cannot afford is no protection.
+- A trace is a bidding war you lead: raise it just past what the Ghost can pay to match, or not at all.
+- Purge when the Ghost's virus counters start to bite, and before they turn one Mainframe run into four.
 - Keep credits back during the Ghost's turn. An upgrade or asset activated mid-run is a surprise the Ghost had to plan around without knowing it was there.
 - A 2-counter project can be installed, developed twice and scored in a single turn.
 - Rapid Prototyping lets a 3-counter project do the same, and makes Decoy Lab look like a real project.

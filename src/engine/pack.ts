@@ -3,20 +3,28 @@
 // A pack can only use the effect ops the engine already interprets, so every custom card is
 // played by the same rules code as the built-in cards. Anything the engine could not carry out
 // is rejected here, with a message that says which card and which field.
-import { CARDS, defaultDeck } from './cards';
+import { CARDS, defaultDeck, defaultIdentities, ensureCards } from './cards';
 import { DAMAGE_KINDS, type CardDef, type CardPack, type CardType, type Effect, type GameSetup, type Side } from './types';
 
 export type PackResult = { ok: true; setup: GameSetup; warnings: string[] } | { ok: false; errors: string[] };
 
 const SIDE_TYPES: Record<Side, CardType[]> = {
-  corp: ['project', 'ice', 'asset', 'upgrade', 'directive'],
-  ghost: ['program', 'gear', 'contact', 'stunt'],
+  corp: ['project', 'ice', 'asset', 'upgrade', 'directive', 'identity'],
+  ghost: ['program', 'gear', 'contact', 'stunt', 'identity'],
 };
 const INSTALLED_GHOST: CardType[] = ['program', 'gear', 'contact'];
 
 /** Which fields each card type may have, beyond the common ones. */
 const FIELDS: Record<string, CardType[]> = {
   cost: ['ice', 'asset', 'upgrade', 'directive', 'program', 'gear', 'contact', 'stunt'],
+  recurring: ['asset', 'upgrade', ...INSTALLED_GHOST, 'identity'],
+  link: [...INSTALLED_GHOST, 'identity'],
+  virusOn: ['program'],
+  virusAccess: ['program'],
+  virusSpend: ['program'],
+  host: ['gear'],
+  onCorpScore: ['identity'],
+  onSteal: ['identity'],
   dev: ['project'],
   points: ['project'],
   stealCost: ['project'],
@@ -34,30 +42,33 @@ const FIELDS: Record<string, CardType[]> = {
   playIf: ['directive', 'stunt'],
   onPlay: ['directive', 'stunt'],
   removeAfterPlay: ['directive'],
-  onTurnStart: ['asset', 'upgrade', ...INSTALLED_GHOST],
-  onFirstSuccessfulRun: INSTALLED_GHOST,
+  onTurnStart: ['asset', 'upgrade', ...INSTALLED_GHOST, 'identity'],
+  onFirstSuccessfulRun: [...INSTALLED_GHOST, 'identity'],
   ability: INSTALLED_GHOST,
-  ramBonus: INSTALLED_GHOST,
-  handBonus: INSTALLED_GHOST,
-  prevent: INSTALLED_GHOST,
-  mainframeAccess: INSTALLED_GHOST,
+  ramBonus: [...INSTALLED_GHOST, 'identity'],
+  handBonus: [...INSTALLED_GHOST, 'identity'],
+  prevent: [...INSTALLED_GHOST, 'identity'],
+  mainframeAccess: [...INSTALLED_GHOST, 'identity'],
   ram: ['program'],
   breaker: ['program'],
 };
 const COMMON = new Set(['id', 'name', 'side', 'type', 'copies', 'text']);
 
 /** Where an effect list sits decides which ops it may use. */
-type Slot = 'subs' | 'onApproachNode' | 'onActivateInRun' | 'onPlayCorp' | 'onPlayGhost' | 'instead' | 'plain';
+type Slot = 'subs' | 'onApproachNode' | 'onActivateInRun' | 'onPlayCorp' | 'onPlayGhost' | 'instead' | 'plain' | 'traceInRun' | 'trace';
 
-const ALWAYS = new Set(['gain', 'draw', 'damage', 'heat', 'shedHeat', 'loseCredits', 'drain', 'loseCycle']);
+const ALWAYS = new Set(['gain', 'draw', 'damage', 'heat', 'shedHeat', 'loseCredits', 'drain', 'loseCycle', 'badPublicity', 'clearBadPublicity']);
 const SLOT_OPS: Record<Slot, Set<string>> = {
-  subs: new Set([...ALWAYS, 'endRun', 'trashProgram', 'payOrEndRun']),
+  subs: new Set([...ALWAYS, 'endRun', 'trashProgram', 'payOrEndRun', 'trace']),
   onApproachNode: new Set([...ALWAYS, 'endRun', 'payOrEndRun']),
   onActivateInRun: new Set([...ALWAYS, 'endRun', 'payOrEndRun']),
-  onPlayCorp: new Set([...ALWAYS, 'develop', 'recycleDump']),
+  onPlayCorp: new Set([...ALWAYS, 'develop', 'recycleDump', 'trace']),
   onPlayGhost: new Set([...ALWAYS, 'run', 'reveal', 'recover']),
   instead: ALWAYS,
   plain: ALWAYS,
+  /** what a trace may do when it succeeds: no nested traces or choices */
+  traceInRun: new Set([...ALWAYS, 'endRun']),
+  trace: ALWAYS,
 };
 const OP_KEYS: Record<string, string[]> = {
   gain: ['n', 'who'],
@@ -73,7 +84,10 @@ const OP_KEYS: Record<string, string[]> = {
   payOrEndRun: ['n'],
   develop: ['n'],
   recycleDump: [],
-  run: ['node', 'extraAccess', 'noActivate', 'instead'],
+  run: ['node', 'extraAccess', 'noActivate', 'bypass', 'instead'],
+  trace: ['n', 'success'],
+  badPublicity: ['n'],
+  clearBadPublicity: ['n'],
   reveal: [],
   recover: ['types'],
 };
@@ -111,7 +125,8 @@ function checkEffects(list: unknown, slot: Slot, where: string, errs: string[]):
     }
     for (const k of Object.keys(e)) if (k !== 'op' && !OP_KEYS[op].includes(k)) errs.push(`${at}: "${op}" has no field "${k}"`);
     if (OP_KEYS[op].includes('n') && !isCount(e.n, 20)) errs.push(`${at}: n must be a whole number from 0 to 20`);
-    for (const k of ['perHeat', 'perDev', 'extraAccess'] as const) if (e[k] !== undefined && !isCount(e[k], 10)) errs.push(`${at}: ${k} must be a whole number from 0 to 10`);
+    if (op === 'trace') checkEffects(e.success, slot === 'subs' ? 'traceInRun' : 'trace', `${at}.success`, errs);
+    for (const k of ['perHeat', 'perDev', 'extraAccess', 'bypass'] as const) if (e[k] !== undefined && !isCount(e[k], 10)) errs.push(`${at}: ${k} must be a whole number from 0 to 10`);
     if (e.who !== undefined && e.who !== 'corp' && e.who !== 'ghost') errs.push(`${at}: who must be "corp" or "ghost"`);
     if (op === 'damage' && !DAMAGE_KINDS.includes(e.kind as never)) errs.push(`${at}: kind must be one of ${DAMAGE_KINDS.join(', ')}`);
     if (op === 'run') {
@@ -165,7 +180,21 @@ function checkCard(raw: unknown, i: number, errs: string[]): CardDef | null {
   // what each type needs
   if (type === 'project') {
     if (!(Number(raw.dev) > 0) || !(Number(raw.points) > 0)) errs.push(`${at}: a project needs dev and points above 0`);
-  } else if (raw.cost === undefined) errs.push(`${at}: a ${type} needs a cost`);
+  } else if (raw.cost === undefined && type !== 'identity') errs.push(`${at}: a ${type} needs a cost`);
+  for (const k of ['link', 'virusAccess'] as const) if (raw[k] !== undefined && !isCount(raw[k], 10)) errs.push(`${at}: ${k} must be a whole number from 0 to 10`);
+  if (raw.virusSpend !== undefined && typeof raw.virusSpend !== 'boolean') errs.push(`${at}: virusSpend must be true or false`);
+  if (raw.virusOn !== undefined && !['central', 'mainframe', 'command', 'dump', 'any'].includes(raw.virusOn as string)) errs.push(`${at}: virusOn must be central, mainframe, command, dump or any`);
+  if ((raw.virusAccess !== undefined || raw.virusSpend !== undefined) && raw.virusOn === undefined) errs.push(`${at}: a virus program needs virusOn, or it never gets counters`);
+  if (raw.recurring !== undefined) {
+    const r = raw.recurring;
+    if (!isObj(r) || !isCount(r.n, 10) || !['breakers', 'activateIce', 'trace', 'any'].includes(r.for as string) || Object.keys(r).some((k) => k !== 'n' && k !== 'for'))
+      errs.push(`${at}: recurring needs n (0 to 10) and for (breakers, activateIce, trace or any)`);
+  }
+  if (raw.host !== undefined) {
+    const h = raw.host;
+    if (!isObj(h) || !isCount(h.max, 5) || Number(h.max) < 1 || (h.breakerStrength !== undefined && !isCount(h.breakerStrength, 10)) || Object.keys(h).some((k) => k !== 'max' && k !== 'breakerStrength'))
+      errs.push(`${at}: host needs max (1 to 5) and optionally breakerStrength`);
+  }
   if (type === 'ice') {
     if (!['wall', 'cipher', 'hunter'].includes(raw.subtype as string)) errs.push(`${at}: subtype must be wall, cipher or hunter`);
     if (raw.strength === undefined) errs.push(`${at}: ICE needs a strength`);
@@ -209,6 +238,8 @@ function checkCard(raw: unknown, i: number, errs: string[]): CardDef | null {
     ['onAccess', 'plain'],
     ['onTurnStart', 'plain'],
     ['onFirstSuccessfulRun', 'plain'],
+    ['onCorpScore', 'plain'],
+    ['onSteal', 'plain'],
   ];
   for (const [k, slot] of slots) if (raw[k] !== undefined) checkEffects(raw[k], slot, `${at} ${k}`, errs);
   return errs.length === n0 ? (raw as unknown as CardDef) : null;
@@ -254,7 +285,7 @@ export function loadPack(raw: unknown): PackResult {
       // the built-in deck, with pack cards replacing built-in cards of the same id, plus new pack cards
       decks[side] = defaultDeck(side);
       for (const d of defs) {
-        if (d.side !== side) continue;
+        if (d.side !== side || d.type === 'identity') continue;
         delete decks[side][d.id];
         if (d.copies > 0) decks[side][idMap.get(d.id)!] = d.copies;
       }
@@ -267,7 +298,9 @@ export function loadPack(raw: unknown): PackResult {
     decks[side] = {};
     for (const [id, copies] of Object.entries(list)) {
       const s = sideOf(id);
+      const isId = (defs.find((d) => d.id === id) ?? builtIn.get(id))?.type === 'identity';
       if (!s) errs.push(`decks.${side}: no card "${id}" in this pack or the built-in set`);
+      else if (isId) errs.push(`decks.${side}: "${id}" is an identity; identities are chosen when a game starts, not put in decks`);
       else if (s !== side) errs.push(`decks.${side}: "${id}" is a ${s} card`);
       else if (!isCount(copies, 20)) errs.push(`decks.${side}: copies of "${id}" must be a whole number from 0 to 20`);
       else if ((copies as number) > 0) decks[side][idMap.get(id) ?? id] = copies as number;
@@ -275,19 +308,19 @@ export function loadPack(raw: unknown): PackResult {
   }
   if (errs.length) return { ok: false, errors: errs };
 
-  const byId = new Map([...CARDS, ...cards].map((c) => [c.id, c]));
-  for (const side of ['corp', 'ghost'] as const) {
-    const size = Object.values(decks[side]).reduce((a, b) => a + b, 0);
-    if (size < 15) errs.push(`the ${side} deck has ${size} cards; it needs at least 15`);
-    if (size > 120) errs.push(`the ${side} deck has ${size} cards; the most is 120`);
-  }
-  const pts = Object.entries(decks.corp).reduce((n, [id, k]) => n + (byId.get(id)?.points ?? 0) * k, 0);
-  if (pts < 7) warnings.push(`the Corp deck has only ${pts} project points, so no one can win on points (the game ends when the Mainframe runs out)`);
-  const breakers = Object.keys(decks.ghost).filter((id) => byId.get(id)?.breaker);
-  if (!breakers.length) warnings.push('the Ghost deck has no breakers, so any active "end the run" stops every run');
-  if (errs.length) return { ok: false, errors: errs };
+  const problems = deckProblems(decks, cards);
+  warnings.push(...problems.warnings);
+  if (problems.errors.length) return { ok: false, errors: problems.errors };
 
-  return { ok: true, setup: { packName: (raw.name as string).trim(), cards, decks }, warnings };
+  // the pack's first identity for each side, else the built-in default
+  const identities = defaultIdentities();
+  for (const side of ['corp', 'ghost'] as const) {
+    const own = cards.find((c) => c.side === side && c.type === 'identity');
+    const replacedDefault = defs.find((d) => d.id === identities[side]);
+    if (own) identities[side] = own.id;
+    else if (replacedDefault) identities[side] = idMap.get(replacedDefault.id)!;
+  }
+  return { ok: true, setup: { packName: (raw.name as string).trim(), identities, cards, decks }, warnings };
 }
 
 /** The built-in set written as a pack: a template to copy and change. */
@@ -304,4 +337,37 @@ export function parsePack(text: string): PackResult {
     return { ok: false, errors: [`That is not valid JSON: ${(e as Error).message}`] };
   }
   return loadPack(raw);
+}
+
+/** Deck size limits, and warnings for decks that cannot be won on points or have no breakers. */
+export function deckProblems(decks: Record<Side, Record<string, number>>, custom: CardDef[]): { errors: string[]; warnings: string[] } {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const byId = new Map([...CARDS, ...custom].map((c) => [c.id, c]));
+  for (const side of ['corp', 'ghost'] as const) {
+    const size = Object.values(decks[side]).reduce((a, b) => a + b, 0);
+    if (size < 15) errors.push(`the ${side} deck has ${size} cards; it needs at least 15`);
+    if (size > 120) errors.push(`the ${side} deck has ${size} cards; the most is 120`);
+  }
+  const pts = Object.entries(decks.corp).reduce((n, [id, k]) => n + (byId.get(id)?.points ?? 0) * k, 0);
+  if (pts < 7) warnings.push(`the Corp deck has only ${pts} project points, so no one can win on points (the game ends when the Mainframe runs out)`);
+  const breakers = Object.entries(decks.ghost).filter(([id, k]) => k > 0 && byId.get(id)?.breaker);
+  if (!breakers.length) warnings.push('the Ghost deck has no breakers, so any active "end the run" stops every run');
+  return { errors, warnings };
+}
+
+const strip = (id: string) => id.replace(/^x[0-9a-f]{8}-/, '');
+
+/** Cards a deck for this side can be built from: built-in cards the pack does not replace, plus the pack's. No identities. */
+export function deckPool(setup: GameSetup, side: Side): CardDef[] {
+  ensureCards({ setup });
+  const replaced = new Set(setup.cards.map((c) => strip(c.id)));
+  return [...CARDS.filter((c) => !replaced.has(c.id)), ...setup.cards].filter((c) => c.side === side && c.type !== 'identity');
+}
+
+/** A setup written back out as a pack file, with plain ids, so it can be shared, edited and loaded again. */
+export function exportPack(setup: GameSetup, name = setup.packName ?? 'My decks'): CardPack {
+  const decks: Record<Side, Record<string, number>> = { corp: {}, ghost: {} };
+  for (const side of ['corp', 'ghost'] as const) for (const [id, n] of Object.entries(setup.decks[side])) if (n > 0) decks[side][strip(id)] = n;
+  return { name, cards: setup.cards.map((c) => ({ ...c, id: strip(c.id) })), decks };
 }

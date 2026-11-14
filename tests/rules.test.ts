@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { CARDS, cardOf, deckList } from '../src/engine/cards';
 import { legalActions } from '../src/engine/legal';
-import { actor, newGame, nodeOf, points } from '../src/engine/state';
+import { actor, maxHand, newGame, nodeOf, points } from '../src/engine/state';
 import { viewFor } from '../src/engine/view';
 import { act, actRaw, blank, corpTurn, ghostTurn, hand, ice, rejects, rig, site, take, upgrade } from './helpers';
+import { loadPack } from '../src/engine/pack';
 
 describe('card data', () => {
   it('every card has the fields its type needs', () => {
@@ -11,7 +12,7 @@ describe('card data', () => {
     for (const c of CARDS) {
       expect(c.name && c.copies > 0, c.id).toBeTruthy();
       if (c.type === 'project') expect(c.dev! > 0 && c.points! > 0, c.id).toBe(true);
-      else expect(c.cost, c.id).toBeTypeOf('number');
+      else if (c.type !== 'identity') expect(c.cost, c.id).toBeTypeOf('number');
       if (c.type === 'ice') expect(c.subs!.length > 0 && c.strength! > 0 && !!c.subtype, c.id).toBe(true);
       if (c.type === 'asset' || c.type === 'upgrade') expect(c.trash, c.id).toBeTypeOf('number');
       if (c.type === 'program') expect(c.ram, c.id).toBeTypeOf('number');
@@ -19,10 +20,10 @@ describe('card data', () => {
       expect(['corp', 'ghost']).toContain(c.side);
     }
   });
-  it('decks: 52 Corp cards with 21 project points, 41 Ghost cards', () => {
-    expect(deckList('corp')).toHaveLength(52);
-    expect(deckList('ghost')).toHaveLength(41);
-    expect(deckList('corp').reduce((n, c) => n + (cardOf(c).points ?? 0), 0)).toBe(21);
+  it('decks: 61 Corp cards with 25 project points, 51 Ghost cards', () => {
+    expect(deckList('corp')).toHaveLength(61);
+    expect(deckList('ghost')).toHaveLength(51);
+    expect(deckList('corp').reduce((n, c) => n + (cardOf(c).points ?? 0), 0)).toBe(25);
   });
 });
 
@@ -509,5 +510,112 @@ describe('damage kinds', () => {
     expect(t.phase).toBe('discard');
     t = act(t, { type: 'discard', card: t.ghost.hand[0] });
     expect(t.turn).toBe('corp');
+  });
+});
+
+describe('traces and link', () => {
+  it('the Corp boosts first, then the Ghost; a tie goes to the Ghost; the Ghost is only offered what beating it takes', () => {
+    let s = corpTurn(blank(), 20);
+    s.ghostSuccessLastTurn = true;
+    const [c] = hand(s, 'corp', 'records-request');
+    s = act(s, { type: 'play', card: c });
+    expect(legalActions(s)).toHaveLength(16); // 0..15
+    s = act(s, { type: 'traceBoost', n: 0 }); // trace 4, link 0
+    s.ghost.credits = 10;
+    expect(legalActions(s).map((a) => (a as { n: number }).n)).toEqual([0, 1, 2, 3, 4]);
+    s = act(s, { type: 'traceBoost', n: 4 }); // link 4 ties: the Ghost evades
+    expect(s.ghost.heat).toBe(0);
+    expect(s.trace).toBeNull();
+    expect(actor(s)).toBe('corp');
+  });
+  it('link from identity and gear counts', () => {
+    let s = corpTurn(blank('ghost', { ghost: 'wren-ortiz' }), 0);
+    rig(s, 'signal-booster');
+    s.ghost.credits = 0;
+    s.ghostSuccessLastTurn = true;
+    s.corp.credits = 1;
+    const [c] = hand(s, 'corp', 'records-request');
+    s = act(s, { type: 'play', card: c });
+    s = act(s, { type: 'traceBoost', n: 0 }); // 4 against link 3
+    expect(legalActions(s)).toEqual([{ type: 'traceBoost', n: 0 }]); // the Ghost has no money
+    s = act(s, { type: 'traceBoost', n: 0 });
+    expect(s.ghost.heat).toBe(1);
+  });
+});
+
+describe('bad publicity', () => {
+  it('gives the Ghost that many credits for each run, spent before their own and gone when the run ends', () => {
+    let s = ghostTurn(blank(), 1);
+    s.corp.badPublicity = 2;
+    const [key] = rig(s, 'skeleton-key');
+    ice(s, 'command', 'riddlegate');
+    s = act(s, { type: 'run', node: 'command' });
+    expect(s.run!.bpCredits).toBe(2);
+    s = act(s, { type: 'break', card: key, sub: 0 });
+    s = act(s, { type: 'break', card: key, sub: 1 });
+    expect(s.ghost.credits).toBe(1); // both breaks paid from bad publicity credits
+  });
+  it('unspent bad publicity credits do not carry over', () => {
+    let s = ghostTurn(blank(), 0);
+    s.corp.badPublicity = 3;
+    s.corp.credits = 0;
+    s = act(s, { type: 'run', node: 'command' });
+    expect(s.run).toBeNull();
+    expect(s.ghost.credits).toBe(0);
+  });
+});
+
+describe('viruses and purging', () => {
+  it('purging takes all 3 Corp cycles and removes every virus counter', () => {
+    let s = corpTurn(blank());
+    const [t] = rig(s, 'termite-script');
+    s.ghost.virus[t] = 3;
+    s = act(s, { type: 'credit' });
+    expect(legalActions(s)).not.toContainEqual({ type: 'purge' });
+    s = corpTurn(s);
+    s = act(s, { type: 'purge' });
+    expect(s.ghost.virus).toEqual({});
+    expect(s.corp.cycles).toBe(0);
+  });
+});
+
+describe('recurring credits and hosting', () => {
+  it('recurring credits go away with the card; a trashed host takes its hosted programs with it', () => {
+    const r = loadPack({
+      name: 'host test',
+      cards: [
+        { id: 'plain-corp', name: 'Plain Corp', side: 'corp', type: 'identity', copies: 1, text: 'Identity.' },
+        { id: 'plain-ghost', name: 'Plain Ghost', side: 'ghost', type: 'identity', copies: 1, text: 'Identity.' },
+        { id: 'flimsy-rack', name: 'Flimsy Rack', side: 'ghost', type: 'gear', copies: 1, cost: 0, host: { max: 1 },
+          recurring: { n: 1, for: 'any' }, ability: { cycles: 0, trashSelf: true, effects: [{ op: 'gain', n: 1 }] },
+          text: 'Can host 1 program, which uses no RAM. 1 recurring credit. Trash this (no cycle): gain 1 credit.' },
+      ],
+    });
+    if (!r.ok) throw new Error(r.errors.join());
+    let s = newGame({ seed: 2, human: 'ghost', setup: r.setup });
+    s = act(act(s, { type: 'keep' }), { type: 'keep' });
+    s = ghostTurn(structuredClone(s));
+    for (const side of ['corp', 'ghost'] as const) s[side].deck.push(...s[side].hand.splice(0));
+    const rack = take(s, r.setup.cards[2].id);
+    s.ghost.hand.push(rack);
+    s = act(s, { type: 'install', card: rack });
+    expect(s.ghost.recurring[rack]).toBe(1);
+    const [knife] = hand(s, 'ghost', 'stiletto');
+    s = act(s, { type: 'install', card: knife, host: rack });
+    s = act(s, { type: 'use', card: rack });
+    expect(s.ghost.programs).toEqual([]);
+    expect(s.ghost.discard).toEqual(expect.arrayContaining([rack, knife]));
+    expect(s.ghost.recurring).toEqual({});
+    expect(s.ghost.hosted).toEqual({});
+  });
+});
+
+describe('identities', () => {
+  it('are public, start in play, and are not part of any deck', () => {
+    const s = newGame({ seed: 1, human: 'ghost', identities: { corp: 'vigil-systems', ghost: 'halcyon' } });
+    expect(s.corp.identity).toBe('vigil-systems#1');
+    expect(viewFor(s, 'ghost').corp.identity).toBe('vigil-systems#1');
+    expect(deckList('corp')).not.toContain('helix-dynamics#1');
+    expect(maxHand(s, 'ghost')).toBe(6);
   });
 });
