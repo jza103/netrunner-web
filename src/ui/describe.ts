@@ -71,7 +71,8 @@ export function describeAction(s: GameState, a: Action): string {
       return '🃏 Draw 1 card';
     case 'install': {
       const d = cardOf(a.card);
-      if (d.side === 'ghost') return a.host ? `⬇️ Install ${d.name} on ${label(a.host)} (${d.cost}¢, no RAM)` : `⬇️ Install ${d.name} (${d.cost}¢)`;
+      if (d.side === 'ghost') return a.host ? `⬇️ Install ${d.name} on ${label(a.host)} (${d.cost}¢, no RAM)` : a.trash ? `⬇️ Install ${d.name}, trashing programs first (${d.cost}¢)` : `⬇️ Install ${d.name} (${d.cost}¢)`;
+      if (a.trash) return `⬇️ Install in ${nodeName(a.node!)}, trashing cards there first`;
       const cost = d.type === 'ice' && a.node && a.node !== 'new' ? nodeOf(s, a.node).ice.length : 0;
       const spot = a.node === 'new' ? 'a new site' : nodeName(a.node!);
       const swap = d.type !== 'ice' && d.type !== 'upgrade' && a.node !== 'new' && nodeOf(s, a.node!).root ? ' (trashes what is there)' : '';
@@ -108,8 +109,14 @@ export function describeAction(s: GameState, a: Action): string {
       const cost = [ab.cycles ? `${ab.cycles} cycle` : 'no cycle', ab.credits ? `${ab.credits}¢` : '', ab.trashSelf ? 'trash it' : ''].filter(Boolean).join(', ');
       return `✨ ${d.name}: ${ab.effects.map((e) => effectText(e, 'ghost')).join(' ')} (${cost})`;
     }
-    case 'scrap':
-      return `🗑️ Scrap ${label(a.card)} (free)`;
+    case 'pickTrash':
+      return `🗑️ Trash ${label(a.card)}${where(s, a.card) ? ` in ${where(s, a.card)}` : ''} as part of the install`;
+    case 'confirmInstall':
+      return '✅ Finish installing';
+    case 'cancelInstall':
+      return '↩️ Take the install back';
+    case 'shedProgram':
+      return `🗑️ Trash ${label(a.card)} (over RAM)`;
     case 'boost': {
       const b = cardOf(a.card).breaker!;
       return `⬆️ Boost ${label(a.card)} +${b.boostBy} (${b.boostCost}¢)`;

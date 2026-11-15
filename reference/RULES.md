@@ -22,7 +22,7 @@ Each side shuffles its own deck, takes 5 credits and draws 5 cards. Each side, C
 - **Mainframe**: the Corp's deck. A successful run accesses the top card.
 - **Dump**: the Corp's discard pile. A successful run turns every card there faceup and accesses all of them.
 
-**Sites** are extra nodes the Corp creates (up to 6). Each site holds at most one project or asset. Any node can be protected by up to 5 pieces of ICE in a row; the newest ICE is always outermost. **Upgrades** can be installed in any node, central or site, alongside whatever else is there, and a node can hold several. Corp cards are installed facedown and inactive.
+**Sites** are extra nodes the Corp creates (any number). Each site holds at most one project or asset. A site with nothing left in it or protecting it is gone. Any node can be protected by any number of ICE in a row; new ICE always goes outermost. **Upgrades** can be installed in any node, central or site, alongside whatever else is there, and a node can hold several. Corp cards are installed facedown and inactive.
 
 **The Ghost's rig.** Installed programs (limited by RAM, 4 to start), gear and contacts. The Ghost's discard pile is the Scrapheap.
 
@@ -38,7 +38,7 @@ The Corp gets **3 cycles** a turn and the Ghost gets **4**. Every cycle must be 
 
 - 1 cycle: gain 1 credit
 - 1 cycle: draw 1 card
-- 1 cycle: install a card. A project or asset goes into a site (new or existing; a project or asset already there is trashed). An upgrade goes into any node (new site or existing node) and replaces nothing. ICE goes on any node and costs 1 credit for each ICE already protecting that node.
+- 1 cycle: install a card. A project or asset goes into a site (new or existing; a project or asset already there is trashed). An upgrade goes into any node (new site or existing node). ICE goes on any node and costs 1 credit for each ICE already protecting that node. As part of installing, the Corp may first trash any of the ICE protecting that node (installing ICE; trashed ICE does not count toward the cost) or any cards in that node's root (installing a project, asset or upgrade). Trashed cards go to the Dump faceup if they were active, facedown if not.
 - 1 cycle: play a directive, paying its cost
 - 1 cycle and 1 credit: develop an installed project (or an asset that says it can be developed), adding 1 development counter
 - 1 cycle and 2 credits, only while the Ghost has heat: trash one of the Ghost's contacts
@@ -53,13 +53,13 @@ Without spending a cycle, the Corp may:
 
 - 1 cycle: gain 1 credit
 - 1 cycle: draw 1 card
-- 1 cycle: install a program, gear or contact, paying its cost. Programs need free RAM, unless they are installed onto a card that can **host** them (the hosted program uses no RAM; if the host is trashed, what it hosts goes with it).
+- 1 cycle: install a program, gear or contact, paying its cost. Programs need free RAM, unless they are installed onto a card that can **host** them (the hosted program uses no RAM; if the host is trashed, what it hosts goes with it). As part of installing a program, the Ghost may first trash any installed programs, and must trash enough to fit the new one. This is the only way to trash your own programs. If RAM ever drops below what installed programs use, the Ghost trashes programs at once until they fit.
 - 1 cycle: play a stunt, paying its cost
 - 1 cycle: make a run on a node
 - 1 cycle and 2 credits: shed 1 heat
 - card abilities that say "spend 1 cycle"
 
-Without spending a cycle, on their own turn the Ghost may scrap (trash) one of their installed programs, and use abilities that say "no cycle".
+Without spending a cycle, the Ghost may use abilities that say "no cycle", in any window (see Windows).
 
 ## Runs
 

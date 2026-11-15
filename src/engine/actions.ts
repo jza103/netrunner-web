@@ -3,7 +3,7 @@
 import { cardOf, ensureCards, nameOf } from './cards';
 import { conditionHolds, corpRunOptions, isLegal, windowOptions } from './legal';
 import { randInt, shuffle } from './rng';
-import { actor, cloneState, corpSources, currentIce, findInstalled, ghostSources, iceStrength, link, maxHand, nodeName, nodeOf, points, recurringFor, rigOf, rigSum } from './state';
+import { actor, cloneState, corpSources, currentIce, findInstalled, ghostSources, iceStrength, isSite, link, maxHand, nodeName, nodeOf, points, recurringFor, rigOf, rigSum } from './state';
 import {
   CYCLES,
   POINTS_TO_WIN,
@@ -626,7 +626,17 @@ function playCard(s: GameState, a: Extract<Action, { type: 'play' }>) {
   runEffects(s, d.onPlay, { owner: side, source: d.name, target: a.target, node: a.node });
 }
 
-function corpInstall(s: GameState, a: Extract<Action, { type: 'install' }>) {
+/** Trash a Corp card as part of an install: it goes to the Dump faceup if it was active (CR 8.5.7). */
+function trashForInstall(s: GameState, card: CardId) {
+  const t = findInstalled(s, card)!;
+  const wasActive = t.inst.active;
+  removeCorpCard(s, card);
+  s.corp.discard.push(card);
+  if (wasActive) s.corp.discardSeen.push(card);
+  emit(s, 'trash', 'corp', wasActive ? `The Corp trashes ${nameOf(card)} to make room.` : 'The Corp trashes a facedown card to make room.');
+}
+
+function corpInstall(s: GameState, a: { card: CardId; node?: NodeId | 'new' }, trash: CardId[]) {
   const c = s.corp;
   const d = cardOf(a.card);
   let node = a.node === 'new' ? null : nodeOf(s, a.node!);
@@ -636,6 +646,7 @@ function corpInstall(s: GameState, a: Extract<Action, { type: 'install' }>) {
   }
   c.cycles--;
   c.hand = c.hand.filter((x) => x !== a.card);
+  for (const x of trash) trashForInstall(s, x);
   const where = nodeName(node.id);
   if (d.type === 'ice') {
     pay(s, 'corp', node.ice.length, 'install');
@@ -645,23 +656,24 @@ function corpInstall(s: GameState, a: Extract<Action, { type: 'install' }>) {
     node.upgrades.push({ card: a.card, active: false, dev: 0 });
     emit(s, 'install', 'corp', `The Corp installs a card in ${where}.`, { side: 'corp', text: `You install ${d.name} (upgrade) in ${where}.` });
   } else {
+    // a project or asset must replace the one already there
     if (node.root) {
-      const old = node.root;
-      delete c.recurring[old.card];
-      c.discard.push(old.card);
-      if (old.active) c.discardSeen.push(old.card);
-      s.ghost.known = s.ghost.known.filter((x) => x !== old.card);
-      emit(s, 'trash', 'corp', `The Corp trashes the card already in ${where}.`);
+      delete c.recurring[node.root.card];
+      trashForInstall(s, node.root.card);
     }
     node.root = { card: a.card, active: false, dev: 0 };
     emit(s, 'install', 'corp', `The Corp installs a card in ${where}.`, { side: 'corp', text: `You install ${d.name} in ${where}.` });
   }
 }
 
-function ghostInstall(s: GameState, a: Extract<Action, { type: 'install' }>) {
+function ghostInstall(s: GameState, a: { card: CardId; host?: CardId }, trash: CardId[]) {
   const g = s.ghost;
   const d = cardOf(a.card);
   g.cycles--;
+  for (const x of trash) {
+    trashGhostCard(s, x);
+    emit(s, 'trash', 'ghost', `The Ghost trashes ${nameOf(x)} to make room.`);
+  }
   pay(s, 'ghost', d.cost ?? 0, 'install');
   g.hand = g.hand.filter((x) => x !== a.card);
   (d.type === 'program' ? g.programs : d.type === 'gear' ? g.gear : g.contacts).push(a.card);
@@ -670,6 +682,15 @@ function ghostInstall(s: GameState, a: Extract<Action, { type: 'install' }>) {
     g.hosted[a.card] = a.host;
     emit(s, 'install', 'ghost', `The Ghost installs ${d.name} on ${nameOf(a.host)}.`);
   } else emit(s, 'install', 'ghost', `The Ghost installs ${d.name}.`);
+}
+
+function install(s: GameState, a: { card: CardId; node?: NodeId | 'new'; host?: CardId }, trash: CardId[]) {
+  return cardOf(a.card).side === 'corp' ? corpInstall(s, a, trash) : ghostInstall(s, a, trash);
+}
+
+/** Sites that hold nothing cease to exist (CR 8.5.8), except the one being run. */
+function dropEmptySites(s: GameState) {
+  s.corp.nodes = s.corp.nodes.filter((n) => !isSite(n.id) || n.root || n.ice.length || n.upgrades.length || s.run?.node === n.id);
 }
 
 function useAbility(s: GameState, card: CardId) {
@@ -741,7 +762,27 @@ function step(s: GameState, a: Action) {
       drawCards(s, side, 1);
       return;
     case 'install':
-      return side === 'corp' ? corpInstall(s, a) : ghostInstall(s, a);
+      if (a.trash) {
+        s.pendingInstall = { card: a.card, node: a.node, host: a.host, trash: [] };
+        return;
+      }
+      return install(s, a, []);
+    case 'pickTrash':
+      s.pendingInstall!.trash.push(a.card);
+      return;
+    case 'confirmInstall': {
+      const p = s.pendingInstall!;
+      s.pendingInstall = null;
+      return install(s, p, p.trash);
+    }
+    case 'cancelInstall':
+      s.pendingInstall = null;
+      s.inAction = false;
+      return;
+    case 'shedProgram':
+      trashGhostCard(s, a.card);
+      emit(s, 'trash', 'ghost', `The Ghost is over its RAM and trashes ${nameOf(a.card)}.`);
+      return;
     case 'play':
       return playCard(s, a);
     case 'develop': {
@@ -775,10 +816,6 @@ function step(s: GameState, a: Action) {
       return;
     case 'use':
       return useAbility(s, a.card);
-    case 'scrap':
-      trashGhostCard(s, a.card);
-      emit(s, 'trash', 'ghost', `The Ghost scraps ${nameOf(a.card)}.`);
-      return;
     case 'boost': {
       const b = cardOf(a.card).breaker!;
       pay(s, 'ghost', b.boostCost, 'boost');
@@ -889,7 +926,8 @@ export function apply(state: GameState, action: Action): Result {
   step(s, action);
   // a card used inside a window: the window stays open while that side could do more
   if (inWindow && s.window && action.type !== 'pass' && s.window.who === actor(state) && !windowOptions(s, s.window.who, s.window.at).length) passWindow(s);
-  if (s.inAction && s.phase === 'action' && !s.run && !s.trace && !s.window) {
+  dropEmptySites(s);
+  if (s.inAction && s.phase === 'action' && !s.run && !s.trace && !s.window && !s.pendingInstall) {
     s.inAction = false;
     beforeAction(s);
   }
@@ -901,7 +939,7 @@ export function explain(s: GameState, a: Action): string {
   const side = actor(s);
   if (!side) return 'The game is over.';
   const p = s[side];
-  if (s.phase === 'action' && p.cycles <= 0 && !['endTurn', 'score', 'activate', 'use', 'scrap'].includes(a.type)) return 'You have no cycles left this turn.';
+  if (s.phase === 'action' && p.cycles <= 0 && !['endTurn', 'score', 'activate', 'use', 'pass'].includes(a.type)) return 'You have no cycles left this turn.';
   if ('card' in a && a.card && !a.card.startsWith('?')) {
     const d = cardOf(a.card);
     if ((a.type === 'install' || a.type === 'play' || a.type === 'activate') && p.credits < (d.cost ?? 0)) return `${d.name} costs ${d.cost} and you have ${p.credits}.`;

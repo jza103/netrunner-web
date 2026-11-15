@@ -764,8 +764,12 @@ describe('identities, traces, bad publicity, viruses, bypass, recurring credits,
     expect(breakerStrength(s, blade)).toBe(3);
     const [other] = hand(s, 'ghost', 'stiletto');
     expect(legalActions(s)).not.toContainEqual({ type: 'install', card: other, host: frame }); // full
-    // scrapping the hosted program frees the host
-    s = act(s, { type: 'scrap', card: blade });
+    // trashing the hosted program while installing another frees the host
+    const [probe] = hand(s, 'ghost', 'deep-probe');
+    s = act(s, { type: 'install', card: probe, trash: true });
+    s = act(s, { type: 'pickTrash', card: blade });
+    s = act(s, { type: 'pickTrash', card: s.ghost.programs[0] });
+    s = act(s, { type: 'confirmInstall' });
     expect(s.ghost.hosted).toEqual({});
     expect(legalActions(s)).toContainEqual({ type: 'install', card: other, host: frame });
   });

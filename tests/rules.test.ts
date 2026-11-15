@@ -156,18 +156,43 @@ describe('Corp actions', () => {
 });
 
 describe('Ghost actions', () => {
-  it('programs need free RAM; scrapping one frees it', () => {
+  it('programs need free RAM; programs can be trashed only while installing a program (CR 8.5.6c)', () => {
     let s = ghostTurn(blank(), 20);
     const installed = rig(s, 'crowbar', 'crowbar', 'skeleton-key');
     const [knife, probe] = hand(s, 'ghost', 'jackknife', 'deep-probe');
     expect(rejects(s, { type: 'install', card: knife })).toMatch(/RAM/);
     s = act(s, { type: 'install', card: probe });
     rejects(s, { type: 'install', card: knife });
-    s = act(s, { type: 'scrap', card: installed[0] });
-    s = act(s, { type: 'scrap', card: installed[1] });
-    expect(s.ghost.cycles).toBe(3); // scrapping costs no cycle
-    s = act(s, { type: 'install', card: knife });
+    expect(legalActions(s).some((a) => a.type === ('scrap' as string))).toBe(false);
+    // install, trashing programs as part of it: the cycle is spent when the install finishes
+    s = act(s, { type: 'install', card: knife, trash: true });
+    expect(s.ghost.cycles).toBe(3);
+    expect(legalActions(s)).not.toContainEqual({ type: 'confirmInstall' }); // not enough RAM yet
+    s = act(s, { type: 'pickTrash', card: installed[0] });
+    expect(legalActions(s)).not.toContainEqual({ type: 'confirmInstall' });
+    s = act(s, { type: 'pickTrash', card: installed[1] });
+    s = act(s, { type: 'confirmInstall' });
+    expect(s.ghost.cycles).toBe(2);
     expect(s.ghost.programs).toContain(knife);
+    expect(s.ghost.discard).toEqual(expect.arrayContaining([installed[0], installed[1]]));
+    // taking an install back costs nothing
+    const [blade] = hand(s, 'ghost', 'stiletto');
+    let t = act(s, { type: 'install', card: blade, trash: true });
+    t = act(t, { type: 'cancelInstall' });
+    expect(t.ghost.cycles).toBe(2);
+    expect(t.ghost.hand).toContain(blade);
+  });
+  it('programs over the RAM limit must be trashed at once (CR 3.9.3c)', () => {
+    let s = ghostTurn(blank(), 20);
+    const [brick] = rig(s, 'ram-brick');
+    const progs = rig(s, 'crowbar', 'crowbar', 'crowbar', 'skeleton-key', 'stiletto');
+    s = structuredClone(s);
+    s.ghost.gear = s.ghost.gear.filter((g) => g !== brick); // RAM drops from 6 to 4
+    s.ghost.discard.push(brick);
+    expect(actor(s)).toBe('ghost');
+    expect(legalActions(s).every((a) => a.type === 'shedProgram')).toBe(true);
+    s = actRaw(s, { type: 'shedProgram', card: progs[0] });
+    expect(legalActions(s).every((a) => a.type !== 'shedProgram')).toBe(true);
   });
   it('shedding heat costs a cycle and 2 credits', () => {
     let s = ghostTurn(blank(), 3);
@@ -181,6 +206,54 @@ describe('Ghost actions', () => {
     const s = ghostTurn(blank(), 1);
     const [c] = hand(s, 'ghost', 'sledge');
     expect(rejects(s, { type: 'install', card: c })).toMatch(/costs 4/);
+  });
+});
+
+describe('installing (CR 8.5.6)', () => {
+  it('ICE: the Corp may trash ICE on that node first, and those do not count toward the cost', () => {
+    let s = corpTurn(blank(), 0);
+    const old = [ice(s, 'command', 'bulkhead'), ice(s, 'command', 'tripwire', false)];
+    const [wall] = hand(s, 'corp', 'bulkhead');
+    expect(legalActions(s)).not.toContainEqual({ type: 'install', card: wall, node: 'command' }); // costs 2
+    s = act(s, { type: 'install', card: wall, node: 'command', trash: true });
+    expect(legalActions(s)).toEqual([{ type: 'pickTrash', card: old[0] }, { type: 'pickTrash', card: old[1] }, { type: 'cancelInstall' }]);
+    s = act(s, { type: 'pickTrash', card: old[0] });
+    s = act(s, { type: 'pickTrash', card: old[1] });
+    s = act(s, { type: 'confirmInstall' });
+    expect(nodeOf(s, 'command').ice.map((i) => i.card)).toEqual([wall]);
+    expect(s.corp.discard).toEqual(old);
+    expect(s.corp.discardSeen).toEqual([old[0]]); // the active one goes faceup, the facedown one stays facedown
+    expect(s.corp.cycles).toBe(2);
+  });
+  it('root: an upgrade or a new root card may trash cards in that root; a project or asset always replaces the old one', () => {
+    let s = corpTurn(blank());
+    const { id, card: shell } = site(s, 'shell-company');
+    const up = upgrade(s, id, 'choke-point');
+    const [lab, relay] = hand(s, 'corp', 'decoy-lab', 'lockout-relay');
+    s = act(s, { type: 'install', card: relay, node: id, trash: true });
+    expect(legalActions(s)).toContainEqual({ type: 'pickTrash', card: shell });
+    s = act(s, { type: 'pickTrash', card: up });
+    s = act(s, { type: 'confirmInstall' });
+    expect(nodeOf(s, id).upgrades.map((u) => u.card)).toEqual([relay]);
+    s = act(s, { type: 'install', card: lab, node: id });
+    expect(nodeOf(s, id).root!.card).toBe(lab);
+    expect(s.corp.discard).toEqual([up, shell]);
+  });
+  it('no limit on ICE per node or on sites; a site with nothing left in it is gone', () => {
+    let s = corpTurn(blank(), 50);
+    for (const def of ['tripwire', 'bulkhead', 'monolith', 'riddlegate', 'prism-lock', 'watchdog', 'razor-hound']) ice(s, 'command', def);
+    const [w] = hand(s, 'corp', 'bulkhead');
+    s = act(s, { type: 'install', card: w, node: 'command' });
+    expect(nodeOf(s, 'command').ice).toHaveLength(8);
+    for (const def of ['shell-company', 'shell-company', 'decoy-lab', 'decoy-lab', 'watch-desk', 'skyhook-contract', 'quiet-acquisition']) site(s, def);
+    const [x] = hand(s, 'corp', 'skyhook-contract');
+    expect(legalActions(s)).toContainEqual({ type: 'install', card: x, node: 'new' });
+    let t = ghostTurn(blank(), 10);
+    t.corp.credits = 0;
+    const { id } = site(t, 'shell-company');
+    t = act(t, { type: 'run', node: id });
+    t = act(t, { type: 'trash' });
+    expect(t.corp.nodes.some((n) => n.id === id)).toBe(false);
   });
 });
 
@@ -323,7 +396,7 @@ describe('runs', () => {
     expect(s.ghost.credits).toBe(0);
     expect(s.corp.discard).toEqual([card]);
     expect(s.corp.discardSeen).toEqual([card]);
-    expect(nodeOf(s, id).root).toBeNull();
+    expect(s.corp.nodes.some((n) => n.id === id)).toBe(false); // an empty site is gone (CR 8.5.8)
   });
   it('a facedown card the Ghost accessed and left stays known to the Ghost', () => {
     let s = ghostTurn(blank(), 0);

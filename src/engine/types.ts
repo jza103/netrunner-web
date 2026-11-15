@@ -276,6 +276,14 @@ export interface TraceState {
   then: 'subs' | 'none';
 }
 
+export interface PendingInstall {
+  card: CardId;
+  node?: NodeId | 'new';
+  host?: CardId;
+  /** chosen so far */
+  trash: CardId[];
+}
+
 export type Phase = 'mulligan' | 'action' | 'discard' | 'run' | 'gameOver';
 
 /**
@@ -317,6 +325,8 @@ export interface GameState {
   run: RunState | null;
   trace: TraceState | null;
   window: PriorityWindow | null;
+  /** an install waiting while its player picks cards to trash as part of it */
+  pendingInstall: PendingInstall | null;
   /** the side whose turn it is is in the middle of an action (a run, a trace…); the other side's window opens when it completes */
   inAction: boolean;
   /** this turn */
@@ -333,7 +343,14 @@ export type Action =
   | { type: 'mulligan' }
   | { type: 'credit' }
   | { type: 'draw' }
-  | { type: 'install'; card: CardId; node?: NodeId | 'new'; host?: CardId }
+  /** install; with `trash`, first choose cards to trash as part of installing it (CR 8.5.6) */
+  | { type: 'install'; card: CardId; node?: NodeId | 'new'; host?: CardId; trash?: true }
+  /** while choosing what to trash for an install: add a card, finish the install, or take it back */
+  | { type: 'pickTrash'; card: CardId }
+  | { type: 'confirmInstall' }
+  | { type: 'cancelInstall' }
+  /** the Ghost's programs need more RAM than they have: trash one (CR 3.9.3c) */
+  | { type: 'shedProgram'; card: CardId }
   | { type: 'play'; card: CardId; node?: NodeId; target?: CardId }
   | { type: 'develop'; card: CardId }
   | { type: 'score'; card: CardId }
@@ -346,7 +363,6 @@ export type Action =
   | { type: 'run'; node: NodeId }
   | { type: 'shedHeat' }
   | { type: 'use'; card: CardId }
-  | { type: 'scrap'; card: CardId }
   | { type: 'boost'; card: CardId }
   | { type: 'break'; card: CardId; sub: number }
   | { type: 'proceed' }
@@ -370,5 +386,4 @@ export const POINTS_TO_WIN = 7;
 export const HAND_SIZE = 5;
 export const BASE_RAM = 4;
 export const CYCLES: Record<Side, number> = { corp: 3, ghost: 4 };
-export const MAX_SITES = 6;
-export const MAX_ICE = 5;
+

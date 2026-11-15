@@ -757,7 +757,11 @@ function traceChoice(v: GameState, side: Side, legal: Action[]): Action {
 export function chooseAction(v: GameState, level: BotLevel = 'hard'): Action {
   style = LEVELS[level];
   const side = actor(v) as Side;
-  const legal = legalActions(v);
+  // the bots never trash cards as part of an install
+  const legal = legalActions(v).filter((a) => !(a.type === 'install' && a.trash));
+  if (v.pendingInstall) return pick(legal, 'confirmInstall') ?? pick(legal, 'cancelInstall')!;
+  const over = legal.filter((a) => a.type === 'shedProgram');
+  if (over.length) return [...over].sort((a, b) => Number(!!cardOf((a as { card: CardId }).card).breaker) - Number(!!cardOf((b as { card: CardId }).card).breaker))[0];
   // lower levels sometimes waste a cycle on a credit instead of thinking
   if (style.slack && v.phase === 'action' && !v.run && !v.trace && v[side].cycles > 0 && noise(v) < style.slack) {
     const runs = legal.filter((a) => a.type === 'run');

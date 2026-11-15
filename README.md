@@ -98,8 +98,8 @@ Where the rules or a card could be read two ways, this is what the engine does.
 15. **Payroll Heist** gives its heat only if the run succeeds.
 16. **Lockdown Audit** checks only the Ghost's most recent turn.
 17. **Recall** also removes the Ghost's knowledge of what was in the Dump, since those cards are shuffled away.
-18. **Installing over a card in a site** trashes the old card facedown (faceup if it was active). ICE cannot be replaced or removed, and a node holds at most 5.
-19. **Empty sites** are reused before a new site can be opened; there can be at most 6 sites.
+18. **Trashing as part of an install** (CR 8.5.6). Installing ICE, the Corp may first trash any ICE on that node; they do not count toward the cost. Installing into a root, it may first trash any cards in that root; a project or asset always replaces the old one. Installing a program, the Ghost may trash any programs and must trash enough to fit. The app offers these as "install, trashing first": pick the cards, then finish or take the install back (the cycle is spent when it finishes). Trashed Corp cards go to the Dump faceup if active, facedown if not.
+19. **No limits on ICE or sites.** A site with nothing in it or protecting it is removed at once (CR 8.5.8), except the one being run until the run ends. Programs over the RAM limit (if RAM drops) must be trashed at once (CR 3.9.3c).
 20. **Mulligan** is once per side, decided Corp first.
 21. **Damage kinds.** Net, meat and core damage all discard at random, and more than the Ghost's hand flatlines them. Core damage also lowers the Ghost's maximum hand size by 1 per point for the rest of the game. A maximum hand size below 0 at the end of the Ghost's turn flatlines them; exactly 0 means discarding everything.
 22. **Upgrades** install for 1 cycle in any node, central or site, alongside whatever is there; a node may hold any number. Installing a project or asset over a site's root card does not touch its upgrades. A site holding only an upgrade can be run.

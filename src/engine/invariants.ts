@@ -1,7 +1,7 @@
 // Checks that must hold after every action. Used by the soak tests.
 import { cardOf, deckList } from './cards';
-import { corpSources, ghostSources, maxHand, ramLimit, ramUsed } from './state';
-import { MAX_ICE, type CardId, type GameState } from './types';
+import { corpSources, ghostSources, maxHand } from './state';
+import type { CardId, GameState } from './types';
 
 export function allCards(s: GameState): CardId[] {
   const c = s.corp;
@@ -34,7 +34,7 @@ export function violations(s: GameState): string[] {
   if (c.credits < 0 || g.credits < 0) v.push('negative credits');
   if (c.cycles < 0 || g.cycles < 0) v.push('negative cycles');
   if (g.heat < 0) v.push('negative heat');
-  if (ramUsed(s) > ramLimit(s)) v.push('programs exceed RAM');
+  // programs over RAM are allowed only while the Ghost must trash one (legalActions offers nothing else)
   if (g.core < 0) v.push('negative core damage');
   if (c.badPublicity < 0) v.push('negative bad publicity');
   if (cardOf(c.identity).type !== 'identity' || cardOf(g.identity).type !== 'identity') v.push('a side has no identity');
@@ -47,7 +47,6 @@ export function violations(s: GameState): string[] {
   for (const card of Object.keys(c.recurring)) if (!corpSources(s).includes(card)) v.push(`recurring credits on ${card}, which is not in play`);
   if (s.run && s.run.bpCredits < 0) v.push('negative bad publicity credits');
   for (const n of c.nodes) {
-    if (n.ice.length > MAX_ICE) v.push(`${n.id} has too much ICE`);
     for (const i of n.ice) if (cardOf(i.card).type !== 'ice') v.push(`${i.card} is installed as ICE`);
     if (n.root && !['project', 'asset'].includes(cardOf(n.root.card).type)) v.push(`${n.root.card} cannot be in a site`);
     if (n.root && !n.id.startsWith('site')) v.push(`central node ${n.id} has a root card`);

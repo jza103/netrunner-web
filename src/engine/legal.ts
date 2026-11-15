@@ -1,7 +1,7 @@
 // The single source of truth for what may be done. apply() accepts exactly these actions.
 import { cardOf, ensureCards, targetedEffect } from './cards';
 import { actor, available, breakerStrength, canBreak, canDevelop, currentIce, hostsWithRoom, iceStrength, isSite, link, ramLimit, ramUsed, rigOf } from './state';
-import { MAX_ICE, MAX_SITES, type Action, type CardDef, type CardId, type GameState, type NodeId, type PlayCondition, type PriorityWindow, type Side } from './types';
+import { type Action, type CardDef, type CardId, type GameState, type NodeId, type PlayCondition, type PriorityWindow, type Side } from './types';
 
 export function conditionHolds(s: GameState, c: PlayCondition | undefined): boolean {
   if (c === 'ghostHasHeat') return s.ghost.heat > 0;
@@ -18,9 +18,30 @@ function sites(s: GameState) {
   return s.corp.nodes.filter((n) => isSite(n.id));
 }
 
-function canOpenSite(s: GameState): boolean {
-  const all = sites(s);
-  return all.length < MAX_SITES && !all.some((n) => !n.root && n.ice.length === 0 && n.upgrades.length === 0);
+/** Cards the installer may trash as part of installing this card here (CR 8.5.6). */
+export function trashOptions(s: GameState, card: CardId, node?: NodeId | 'new'): CardId[] {
+  const d = cardOf(card);
+  if (d.side === 'ghost') return d.type === 'program' ? [...s.ghost.programs] : [];
+  if (!node || node === 'new') return [];
+  const n = s.corp.nodes.find((x) => x.id === node)!;
+  if (d.type === 'ice') return n.ice.map((i) => i.card);
+  // a project or asset replaces the one already there anyway; the choice is about the rest of the root
+  const root = [...(n.root && d.type === 'upgrade' ? [n.root.card] : []), ...n.upgrades.map((u) => u.card)];
+  return root;
+}
+
+/** Whether an install with these cards trashed as part of it can be finished now. */
+export function installReady(s: GameState, card: CardId, node: NodeId | 'new' | undefined, host: CardId | undefined, trash: CardId[]): boolean {
+  const d = cardOf(card);
+  if (d.side === 'corp') {
+    const n = node && node !== 'new' ? s.corp.nodes.find((x) => x.id === node)! : null;
+    const cost = d.type === 'ice' && n ? n.ice.filter((i) => !trash.includes(i.card)).length : 0;
+    return available(s, 'corp', 'install') >= cost;
+  }
+  if (available(s, 'ghost', 'install') < (d.cost ?? 0)) return false;
+  if (d.type !== 'program' || host) return true;
+  const used = s.ghost.programs.filter((c) => !s.ghost.hosted[c] && !trash.includes(c)).reduce((k, c) => k + (cardOf(c).ram ?? 1), 0);
+  return used + (d.ram ?? 1) <= ramLimit(s);
 }
 
 function developTargets(s: GameState): CardId[] {
@@ -76,15 +97,13 @@ function corpTurn(s: GameState): Action[] {
   if (c.deck.length) out.push({ type: 'draw' });
   for (const card of c.hand) {
     const d = cardOf(card);
-    if (d.type === 'ice') {
-      for (const n of c.nodes) if (n.ice.length < MAX_ICE && available(s, 'corp', 'install') >= n.ice.length) out.push({ type: 'install', card, node: n.id });
-      if (canOpenSite(s)) out.push({ type: 'install', card, node: 'new' });
-    } else if (d.type === 'project' || d.type === 'asset') {
-      for (const n of sites(s)) out.push({ type: 'install', card, node: n.id });
-      if (canOpenSite(s)) out.push({ type: 'install', card, node: 'new' });
-    } else if (d.type === 'upgrade') {
-      for (const n of c.nodes) out.push({ type: 'install', card, node: n.id });
-      if (canOpenSite(s)) out.push({ type: 'install', card, node: 'new' });
+    if (d.type === 'ice' || d.type === 'project' || d.type === 'asset' || d.type === 'upgrade') {
+      const where = d.type === 'project' || d.type === 'asset' ? sites(s) : c.nodes;
+      for (const n of where) {
+        if (installReady(s, card, n.id, undefined, [])) out.push({ type: 'install', card, node: n.id });
+        if (trashOptions(s, card, n.id).length) out.push({ type: 'install', card, node: n.id, trash: true });
+      }
+      out.push({ type: 'install', card, node: 'new' });
     } else if (d.type === 'directive' && available(s, 'corp', 'play') >= (d.cost ?? 0) && directiveReady(s, card)) out.push(...playOptions(s, card, d));
   }
   if (available(s, 'corp', 'develop') >= 1) for (const card of developTargets(s)) out.push({ type: 'develop', card });
@@ -141,7 +160,6 @@ function ghostTurn(s: GameState): Action[] {
   const out: Action[] = [];
   const rig = [...g.programs, ...g.gear, ...g.contacts];
   out.push(...freeAbilities(s));
-  for (const card of g.programs) out.push({ type: 'scrap', card });
   if (g.cycles <= 0) {
     out.push({ type: 'endTurn' });
     return out;
@@ -153,7 +171,8 @@ function ghostTurn(s: GameState): Action[] {
     const cost = d.type === 'stunt' ? available(s, 'ghost', 'play') : available(s, 'ghost', 'install');
     if (cost < (d.cost ?? 0)) continue;
     if (d.type === 'program') {
-      if (ramUsed(s) + (d.ram ?? 1) <= ramLimit(s)) out.push({ type: 'install', card });
+      if (installReady(s, card, undefined, undefined, [])) out.push({ type: 'install', card });
+      if (s.ghost.programs.length && installReady(s, card, undefined, undefined, s.ghost.programs)) out.push({ type: 'install', card, trash: true });
       for (const host of hostsWithRoom(s)) out.push({ type: 'install', card, host });
     } else if (d.type === 'gear' || d.type === 'contact') out.push({ type: 'install', card });
     else if (d.type === 'stunt' && directiveReady(s, card)) out.push(...playOptions(s, card, d));
@@ -254,6 +273,16 @@ export function legalActions(s: GameState): Action[] {
   if (!who) return [];
   if (s.trace) return traceActions(s, who);
   if (s.window) return [...windowOptions(s, who, s.window.at), { type: 'pass' }];
+  if (s.pendingInstall) {
+    const p = s.pendingInstall;
+    const out: Action[] = trashOptions(s, p.card, p.node)
+      .filter((c) => !p.trash.includes(c))
+      .map((card): Action => ({ type: 'pickTrash', card }));
+    if (installReady(s, p.card, p.node, p.host, p.trash)) out.push({ type: 'confirmInstall' });
+    out.push({ type: 'cancelInstall' });
+    return out;
+  }
+  if (s.phase !== 'mulligan' && ramUsed(s) > ramLimit(s)) return s.ghost.programs.filter((c) => !s.ghost.hosted[c]).map((card) => ({ type: 'shedProgram', card }));
   if (s.phase === 'mulligan') return [{ type: 'keep' }, { type: 'mulligan' }];
   if (s.phase === 'discard') return s[who].hand.map((card) => ({ type: 'discard', card }));
   if (s.phase === 'run') return runActions(s);

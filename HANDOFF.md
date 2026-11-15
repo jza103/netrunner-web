@@ -51,10 +51,10 @@ The audit compared the CR with `src/engine` (`legal.ts`, `actions.ts`, `state.ts
 
 **Installing**
 
-- [ ] **2.7 Trashing ICE when installing ICE** (CR 8.5.6b). Before paying, the Corp may trash any number of ICE protecting that node, and those do not count toward the install cost. Now: impossible (ruling 18).
-- [ ] **2.8 Trashing root cards when installing** (CR 8.5.6a). When installing into a site's root (or an upgrade into any node), the Corp may first trash any cards in that root; a new project or asset must replace any old project or asset. Now: only the forced replacement exists; upgrades can never be trashed this way.
-- [ ] **2.9 No ICE or site limits** (CR 3.6.2, 4.6, 8.5.2a). Any number of ICE per node and any number of sites. Now: `MAX_ICE = 5`, `MAX_SITES = 6` in `types.ts` (rulings 18 and 19). The board UI must handle long ICE stacks and many sites on a phone.
-- [ ] **2.10 Programs are trashed only while installing a program** (CR 8.5.6c, 3.9.3b-c). The Runner may trash any installed programs as part of installing a program, and must if RAM would be exceeded. If RAM ever drops below what is in use, the Runner trashes programs at the next checkpoint. There is no free "scrap" action. Now: `scrap` any time on the Ghost's turn, and installing needs free RAM first. Fix: replace `scrap` with an install option that names the programs to trash; add the RAM-drop rule (today no card lowers RAM, but packs can).
+- [x] **2.7 Trashing ICE when installing ICE** (CR 8.5.6b). Before paying, the Corp may trash any number of ICE protecting that node, and those do not count toward the install cost. Now: impossible (ruling 18).
+- [x] **2.8 Trashing root cards when installing** (CR 8.5.6a). When installing into a site's root (or an upgrade into any node), the Corp may first trash any cards in that root; a new project or asset must replace any old project or asset. Now: only the forced replacement exists; upgrades can never be trashed this way.
+- [x] **2.9 No ICE or site limits** (CR 3.6.2, 4.6, 8.5.2a). Any number of ICE per node and any number of sites. Now: `MAX_ICE = 5`, `MAX_SITES = 6` in `types.ts` (rulings 18 and 19). The board UI must handle long ICE stacks and many sites on a phone.
+- [x] **2.10 Programs are trashed only while installing a program** (CR 8.5.6c, 3.9.3b-c). The Runner may trash any installed programs as part of installing a program, and must if RAM would be exceeded. If RAM ever drops below what is in use, the Runner trashes programs at the next checkpoint. There is no free "scrap" action. Now: `scrap` any time on the Ghost's turn, and installing needs free RAM first. Fix: replace `scrap` with an install option that names the programs to trash; add the RAM-drop rule (today no card lowers RAM, but packs can).
 
 **Traces**
 

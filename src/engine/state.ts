@@ -28,6 +28,7 @@ export function newGame(opts: NewGameOptions): GameState {
     mulligan: 'corp',
     trace: null,
     window: null,
+    pendingInstall: null,
     inAction: false,
     corp: {
       identity: `${setup.identities.corp}#1`,
@@ -102,6 +103,8 @@ export function actor(s: GameState): Side | null {
   if (s.phase === 'gameOver') return null;
   if (s.trace) return s.trace.corpBoost === null ? 'corp' : 'ghost';
   if (s.window) return s.window.who;
+  if (s.pendingInstall) return s.turn;
+  if (s.phase !== 'mulligan' && ramUsed(s) > ramLimit(s)) return 'ghost';
   if (s.phase === 'mulligan') return s.mulligan;
   if (s.phase === 'run' && s.run) return ['initiation', 'approach', 'moveIn', 'approachNode', 'corpTrash'].includes(s.run.step) ? 'corp' : 'ghost';
   return s.turn;
