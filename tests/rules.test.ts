@@ -747,8 +747,18 @@ describe('priority windows outside runs (CR 5.6, 5.7)', () => {
     const [phone] = rig(s, 'burner-phone');
     ice(s, 'command', 'bulkhead', true);
     s = act(s, { type: 'run', node: 'command' });
+    // the Ghost has priority first in each run window (CR 9.2): initiation, then the approach
+    expect(s.run!.step).toBe('initiation');
+    expect(actor(s)).toBe('ghost');
+    expect(legalActions(s)).toEqual([{ type: 'use', card: phone }, { type: 'pass' }]);
+    s = act(s, { type: 'pass' });
+    expect(s.run!.step).toBe('approach');
+    expect(s.run!.ghostWindow).toBe(true);
+    s = act(s, { type: 'pass' });
     expect(s.run!.step).toBe('encounter');
     expect(legalActions(s)).toContainEqual({ type: 'use', card: phone });
+    s = act(s, { type: 'use', card: phone });
+    expect(s.ghost.heat).toBe(0);
     let t = corpTurn(blank());
     t.ghost.heat = 2;
     rig(t, 'burner-phone');

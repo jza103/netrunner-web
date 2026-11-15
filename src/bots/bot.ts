@@ -812,6 +812,7 @@ export function chooseAction(v: GameState, level: BotLevel = 'hard'): Action {
     const worst = [...v[side].hand].sort((a, b) => value(v, a) - value(v, b))[0];
     return { type: 'discard', card: worst };
   }
+  if (v.phase === 'run' && v.run?.ghostWindow) return pick(legal, 'pass')!;
   if (v.phase === 'run') return side === 'corp' ? corpRun(v, legal) : ghostRun(v, legal);
   return side === 'corp' ? corpTurn(v, legal) : ghostTurn(v, legal);
 }

@@ -282,6 +282,8 @@ export interface RunState {
   bpCredits: number;
   /** effects that replace accessing cards, and the card they come from */
   instead: Effect[] | null;
+  /** in a Corp run window, the Ghost has priority first and may use no-cycle abilities before the Corp acts (CR 9.2) */
+  ghostWindow?: boolean;
   /** effects when this run succeeds, before access (a stunt's "if successful") */
   ifSuccessful: Effect[] | null;
   source: string | null;

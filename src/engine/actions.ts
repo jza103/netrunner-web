@@ -1,7 +1,7 @@
 // apply(state, action): the only way the game changes. Pure: it never touches its input.
 // Card behaviour is data (see Effect in types.ts); runEffect() below is the one interpreter for it.
 import { cardOf, ensureCards, nameOf } from './cards';
-import { conditionHolds, corpRunOptions, isLegal, windowOptions } from './legal';
+import { conditionHolds, corpRunOptions, freeAbilities, isLegal, windowOptions } from './legal';
 import { randInt, shuffle } from './rng';
 import { actor, breakerStrength, cloneState, corpSources, currentIce, findInstalled, ghostSources, iceStrength, isSite, link, maxHand, nodeName, nodeOf, points, recurringFor, rigOf, rigSum } from './state';
 import {
@@ -428,9 +428,22 @@ function startRun(s: GameState, node: NodeId, opts: RunOpts = {}) {
   corpRunWindow(s, 'initiation');
 }
 
-/** Open one of the Corp's run windows, or skip it when the Corp has nothing it could do there. */
+/**
+ * Open one of the run's paid ability windows: the Ghost has priority first (abilities that cost no
+ * cycle), then the Corp (activations). Each side with nothing it could do is skipped.
+ */
 function corpRunWindow(s: GameState, step: 'initiation' | 'approach' | 'moveIn' | 'approachNode') {
   s.run!.step = step;
+  if (freeAbilities(s).length) {
+    s.run!.ghostWindow = true;
+    return;
+  }
+  if (!corpRunOptions(s).length) closeCorpWindow(s);
+}
+
+/** The Ghost is done in a run window: the Corp gets it, or the run moves on. */
+function ghostPassesRunWindow(s: GameState) {
+  s.run!.ghostWindow = false;
   if (!corpRunOptions(s).length) closeCorpWindow(s);
 }
 
@@ -959,6 +972,7 @@ function step(s: GameState, a: Action) {
       return;
     }
     case 'pass':
+      if (s.run?.ghostWindow) return ghostPassesRunWindow(s);
       return passWindow(s);
     case 'endTurn':
       return endTurn(s);
@@ -978,6 +992,8 @@ export function apply(state: GameState, action: Action): Result {
   step(s, action);
   // a card used inside a window: the window stays open while that side could do more
   if (inWindow && s.window && action.type !== 'pass' && s.window.who === actor(state) && !windowOptions(s, s.window.who, s.window.at).length) passWindow(s);
+  // an ability used in a run window: the Ghost keeps priority while it could do more
+  if (state.run?.ghostWindow && s.run?.ghostWindow && action.type === 'use' && !freeAbilities(s).length) ghostPassesRunWindow(s);
   dropEmptySites(s);
   if (s.inAction && s.phase === 'action' && !s.run && !s.trace && !s.window && !s.pendingInstall) {
     s.inAction = false;

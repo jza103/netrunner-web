@@ -518,7 +518,8 @@ function Prompt({ v, me, myMove, who }: { v: GameState; me: Side; myMove: boolea
   else if (v.phase === 'run' && v.run) {
     const ice = currentIce(v);
     const name = ice ? (isHidden(ice.card) ? 'facedown ICE' : cardOf(ice.card).name) : '';
-    if (v.run.step === 'approach') text = `The Ghost is running on ${nodeName(v.run.node)} and approaches your ${name}. Activate it, or an asset or upgrade?`;
+    if (v.run.ghostWindow) text = 'You have priority in this window: use a card ability that costs no cycle, or pass to the Corp.';
+    else if (v.run.step === 'approach') text = `The Ghost is running on ${nodeName(v.run.node)} and approaches your ${name}. Activate it, or an asset or upgrade?`;
     else if (v.run.step === 'initiation') text = `The Ghost starts a run on ${nodeName(v.run.node)}. Activate an asset or upgrade now?`;
     else if (v.run.step === 'moveIn') text = `The Ghost moves inward on ${nodeName(v.run.node)}. Activate an asset or upgrade now?`;
     else if (v.run.step === 'corpTrash') text = `${name} fires: choose a Ghost program to trash.`;

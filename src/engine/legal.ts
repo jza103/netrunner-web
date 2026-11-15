@@ -207,6 +207,7 @@ function accessChoices(s: GameState): Action[] {
 function runActions(s: GameState): Action[] {
   const run = s.run!;
   const g = s.ghost;
+  if (run.ghostWindow) return [...freeAbilities(s), { type: 'pass' }];
   switch (run.step) {
     case 'initiation':
     case 'approach':

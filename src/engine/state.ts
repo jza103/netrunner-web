@@ -106,6 +106,7 @@ export function actor(s: GameState): Side | null {
   if (s.pendingInstall) return s.turn;
   if (s.phase !== 'mulligan' && ramUsed(s) > ramLimit(s)) return 'ghost';
   if (s.phase === 'mulligan') return s.mulligan;
+  if (s.phase === 'run' && s.run?.ghostWindow) return 'ghost';
   if (s.phase === 'run' && s.run) return ['initiation', 'approach', 'moveIn', 'approachNode', 'corpTrash'].includes(s.run.step) ? 'corp' : 'ghost';
   return s.turn;
 }

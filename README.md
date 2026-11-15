@@ -118,7 +118,7 @@ Where the rules or a card could be read two ways, this is what the engine does.
 34. **Bypass** uses up on the first ICE the Ghost would encounter, including ICE the Corp activates on approach. It ends that encounter at once: the Ghost may then jack out or continue as after passing ICE.
 35. **Hosting.** Installing onto Exo Frame is a choice offered alongside a normal install. A hosted program uses no RAM and stays hosted until it leaves play; if the host is trashed, the hosted program is trashed too.
 36. **Press Leak** and Records Request read "your last turn" as the Ghost's most recent completed turn, the same as Lockdown Audit.
-37. **Ghost abilities that cost no cycle** can be used in any window: on either turn, during runs (encounter and movement steps), and in the windows outside runs, unless the card says "on your turn" (Burner Phone).
+37. **Ghost abilities that cost no cycle** can be used in any paid ability window, on either turn, unless the card says "on your turn" (Burner Phone). In each run window the Ghost has priority first (CR 9.2), then the Corp; the Ghost also has them in the encounter and movement steps. A side with nothing it could do is skipped.
 38. **Bypass and "when encountered".** A bypass ends the encounter before anything in it happens (CR 6.5.8b), so the ICE's `onEncounter` ability does not fire; `onApproach` already has. ICE with no subroutines can be encountered; there is nothing to break.
 39. **"Break up to N".** One payment breaks the first chosen subroutine; the Ghost then picks up to N-1 more for that payment, or stops. Boosting ends the payment.
 
