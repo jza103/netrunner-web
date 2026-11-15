@@ -31,7 +31,7 @@ Follow-ups:
 - The Ghost bot does not plan for facedown upgrades (it does count active Lockout Relays).
 - A pack card that needs a new op cannot be written yet. Each new op needs: the type, `runEffect`, the slot table in `pack.ts`, `effectText`, a test.
 
-### 2. Match the Netrunner rules (audit done Nov 2026; fixes pending)
+### 2. Match the Netrunner rules (done, Nov 2026)
 
 **Goal change.** This app exists so Jason can learn and play Netrunner. Only the cards are original: the rules must match the Null Signal Games *Netrunner Comprehensive Rules* (CR), v26.03, public at https://nullsignal.games/rules/comp-rules/. Breachline keeps its own names for things (see the glossary item below), but every rule must work the way the CR says. Write rules in our own words; never paste CR text into the repo. Rule changes that might make a better game go to a separate 2.0 project, not here.
 
@@ -84,8 +84,11 @@ The audit compared the CR with `src/engine` (`legal.ts`, `actions.ts`, `state.ts
 
 **Checked and already matching:** 3 and 4 clicks with every click spent; basic actions and their costs, including purge for 3 clicks and trashing a resource or removing a tag for 1 click and 2 credits while tagged; ICE install cost; rez ICE only on approach; strength rule for breakers and encounter-long boosts; subroutines resolve in order and end the run stops the rest; bypass; access of Command (random), Mainframe (from the top) and stealing; steal costs; trash costs and no trashing from the Dump; scoring only on the Corp's own turn, for no click; advancing; mulligans (Corp first); 5 credits and 5 cards to start; maximum hand size 5 and discarding at the end of each turn, Corp discards facedown; win at 7 points, by flatline, or when the Corp cannot draw; core damage and a maximum hand size below 0; bad publicity credits for one run; recurring credits; virus counters and purging; traces won only by exceeding link.
 
+**Done.** Every item above is fixed, with tests, RULES.md and README rulings. Things the engine still does differently in form but not in result: the window after moving inward and the approach window are separate prompts (both skipped when empty); the Ghost gets its no-cycle abilities in the encounter and movement steps rather than in every Corp window of a run; and non-project cards in the Dump are accessed without a prompt, since nothing can be done with them. Bot vs bot after the changes: about 50/50 at Hard (`scripts/sim.ts 300`).
+
 ### 3. Play it and fix what feels wrong (after task 2)
 Play at least three full games as each side on a phone. Things to look at:
+- The new prompts: jack-out after every ICE (and on unprotected nodes), the Corp's run windows, the windows on the Ghost's turn when you play the Corp, choosing the access order, installing while trashing cards, and the trace stepper. Are any of them too frequent to be pleasant?
 - Is the action bar too long as the Corp late in the game (one button per develop/score/activate)?
 - Are run decisions clear? The run panel shows the ICE, its subroutines and breaker strengths; the buttons are in the action bar.
 - Does the log read well from both sides?

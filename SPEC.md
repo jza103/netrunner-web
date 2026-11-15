@@ -56,14 +56,14 @@ With the Operator off, nothing leaves the browser.
 Pure TypeScript in `src/engine`, no DOM, no mutation of its input, all randomness from the seeded `rngState`.
 
 - `legalActions(state)` lists every action the acting side may take. It is the single source of truth: `apply` accepts exactly those actions and rejects everything else with a plain-language reason (`explain`).
-- `actor(state)` says who must act: during a run the Corp decides whether to activate ICE and which program to trash; the Ghost decides everything else.
+- `actor(state)` says who must act: the side named in an open priority window, the side choosing cards to trash for an install, and during a run the Corp in its windows (initiation, approach, moving inward, before the node) and when a subroutine needs its choice; the Ghost decides everything else.
 - `viewFor(state, side)` hides what that side may not know (the other hand, both decks, facedown Corp cards the Ghost has not looked at, unseen Dump cards). Bots and the Operator only get views.
 - Events carry a public text plus an optional private text for one side, so a log line can say "The Corp installs a card in Site 1" to the Ghost and "You install Skyhook Contract in Site 1" to the Corp.
 - `violations(state)` checks invariants (card conservation, no negative resources, RAM, zone types).
 
-**Phases:** `mulligan` → (`action` ↔ `run`) → `discard` → next turn … → `gameOver`.
+**Phases:** `mulligan` → (`action` ↔ `run`) → `discard` → next turn … → `gameOver`. Priority windows (`state.window`) open at the start of each turn, before each action for the other side, and after discarding (CR 5.6, 5.7).
 
-**Run steps:** `approach` (Corp: activate or decline) → `encounter` (Ghost: boost, break, proceed) → subroutines fire (`corpTrash` if the Corp must choose a program) → `passed` (Ghost: continue or jack out) → … → `access` (Ghost: steal, trash, leave, one card at a time).
+**Run steps** (CR 6.9): `initiation` (Corp window) → `approach` (Corp: activate this ICE, assets, upgrades, or decline) → `encounter` (Ghost: boost, break, proceed) → subroutines fire (`corpTrash` if the Corp must choose a program) → `passed` (movement; Ghost: continue or jack out) → `moveIn` (Corp window) → … → `approachNode` (Corp's last window) → `access` (Ghost: choose the next card, then steal, trash or leave it). Corp windows with nothing to do are skipped.
 
 ## Card data
 

@@ -5,9 +5,9 @@ import { apply } from '../engine/actions';
 import { breakerText, breaksText, cardOf, defaultSetup, deckList, fullText, identitiesFor, isHidden, poolOf, subText } from '../engine/cards';
 import { builtInPack, deckPool, deckProblems, exportPack, parsePack } from '../engine/pack';
 import { legalActions } from '../engine/legal';
-import { actor, breakerStrength, currentIce, findInstalled, iceStrength, link, maxHand, newGame, nodeName, points, ramLimit, ramUsed } from '../engine/state';
+import { actor, breakerStrength, currentIce, findInstalled, iceStrength, link, maxHand, newGame, nodeName, nodeOf, points, ramLimit, ramUsed } from '../engine/state';
 import { eventText, viewFor } from '../engine/view';
-import { CYCLES, POINTS_TO_WIN, type Action, type CardDef, type CardId, type GameSetup, type GameState, type Installed, type NodeState, type Side } from '../engine/types';
+import { CYCLES, POINTS_TO_WIN, type Action, type CardDef, type CardId, type GameSetup, type GameState, type Installed, type NodeState, type RunStep, type Side } from '../engine/types';
 import { botStep } from '../bots/driver';
 import { describeAction, icon, stats, typeLabel } from './describe';
 import { SPEED_MS, type Settings, loadGame, loadPackSetup, loadSettings, saveGame, savePackSetup, saveSettings, setCurrentShape, stateShape } from './storage';
@@ -523,7 +523,8 @@ function Prompt({ v, me, myMove, who }: { v: GameState; me: Side; myMove: boolea
     else if (v.run.step === 'moveIn') text = `The Ghost moves inward on ${nodeName(v.run.node)}. Activate an asset or upgrade now?`;
     else if (v.run.step === 'corpTrash') text = `${name} fires: choose a Ghost program to trash.`;
     else if (v.run.step === 'encounter') text = `You encounter ${name}. Boost and break with a matching breaker, or let the subroutines fire.`;
-    else if (v.run.step === 'passed') text = name ? `You are past ${name}. Continue inward, or jack out?` : `You are past the ICE here. Continue inward, or jack out?`;
+    else if (v.run.step === 'passed')
+      text = !nodeOf(v, v.run.node).ice.length ? `There is no ICE on ${nodeName(v.run.node)}. Go on to the node, or jack out?` : name ? `You are past ${name}. Continue, or jack out?` : 'You are past that ICE. Continue, or jack out?';
     else if (v.run.step === 'approachNode')
       text = me === 'corp' ? `The Ghost has reached ${nodeName(v.run.node)}. Last chance to activate assets or upgrades.` : `You reach ${nodeName(v.run.node)}. The Corp may activate cards.`;
     else if (v.run.step === 'access') text = v.run.accessing ? `You access ${cardOf(v.run.accessing).name}.` : 'Choose the next card to access.';
@@ -598,6 +599,17 @@ function NodeCol(props: { v: GameState; node: NodeState; open: (c: CardId) => vo
   );
 }
 
+const STEP_NAME: Record<RunStep, string> = {
+  initiation: 'starting the run',
+  approach: 'approaching ICE',
+  encounter: 'encountering ICE',
+  corpTrash: 'a subroutine fires',
+  passed: 'past the ICE: jack out?',
+  moveIn: 'moving inward',
+  approachNode: 'reaching the node',
+  access: 'accessing cards',
+};
+
 function RunPanel({ v, open }: { v: GameState; open: (c: CardId) => void }) {
   const run = v.run!;
   const ice = currentIce(v);
@@ -608,7 +620,7 @@ function RunPanel({ v, open }: { v: GameState; open: (c: CardId) => void }) {
     <section class="panel runpanel" aria-label="Run in progress">
       <header class="row">
         <b>🏃 Run on {nodeName(run.node)}</b>
-        <span class="muted small">{run.noActivate ? 'Blackout: ICE cannot be activated' : run.instead ? (run.source ?? 'special run') : run.step}</span>
+        <span class="muted small">{run.noActivate ? 'Blackout: ICE cannot be activated' : run.instead ? (run.source ?? 'special run') : STEP_NAME[run.step]}</span>
       </header>
       {d && (
         <div class="encounter">

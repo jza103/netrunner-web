@@ -36,6 +36,7 @@ docker compose up
 
 ## How to play (short version)
 
+- Breachline plays by the Netrunner rules (Null Signal Games Comprehensive Rules) with its own original cards and names. Help → Rules ends with a table of the Netrunner terms.
 - First to 7 project points wins. The Corp scores projects by developing them; the Ghost steals them by running.
 - The Corp has 3 cycles a turn, the Ghost 4. A cycle buys a credit, a card, an install, a card play or (for the Ghost) a run.
 - ICE protects nodes. The Corp installs it facedown and pays to activate it when the Ghost runs into it. The Ghost needs a breaker of the matching type (wall, cipher, hunter) to break its subroutines.
@@ -70,7 +71,7 @@ src/engine/
 
 - `apply` is pure. It clones the state, never touches its input, and takes all randomness from `rngState`, so a seed replays exactly.
 - `apply` accepts exactly the actions `legalActions` lists. Anything else returns a plain-language reason.
-- `actor(state)` says whose decision it is. Runs interleave both sides: the Corp chooses whether to activate ICE, assets and upgrades during a run (and which program a subroutine trashes); the Ghost chooses everything else.
+- `actor(state)` says whose decision it is. Turns and runs interleave both sides through priority windows (CR 5.6, 5.7, 6.9): the Corp chooses whether to activate ICE, assets and upgrades in its windows (and which program a subroutine trashes); the Ghost uses no-cycle abilities in its windows and chooses everything else in a run.
 - **Cards are data.** Every card's behaviour is a list of `Effect` ops in its JSON, interpreted by `runEffect` in `actions.ts`, with no card-specific code. Custom card packs use the same ops, so they are played by exactly the same rules code.
 - **Card packs** travel inside the state (`state.setup`): the custom card definitions and both deck lists. Custom ids are namespaced by a hash of the card's content (`x1a2b3c4d-my-card`), so `ensureCards(state)` can add them to the lookup without making `apply` depend on anything but its input. The other side's deck list is removed from each side's view.
 - The UI draws only from `viewFor(state, human)`, and the bot is only ever handed `viewFor(state, botSide)`.
