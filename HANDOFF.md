@@ -27,7 +27,7 @@ Then, at Jason's request, the rest of the gap list was added: identities (Helix 
 Follow-ups:
 - Decks grew to 61 Corp and 51 Ghost cards; deck size and copy counts are worth tuning together with the bots in task 4.
 - The Ghost bot rarely hosts programs on Exo Frame (2 hosted installs in 100 bot games); it only does so when RAM is tight.
-- The trace action bar shows one button per amount; with lots of credits that is a long row. A stepper may read better.
+- The trace action bar is now a stepper (task 2.11).
 - The Ghost bot does not plan for facedown upgrades (it does count active Lockout Relays).
 - A pack card that needs a new op cannot be written yet. Each new op needs: the type, `runEffect`, the slot table in `pack.ts`, `effectText`, a test.
 
@@ -58,7 +58,7 @@ The audit compared the CR with `src/engine` (`legal.ts`, `actions.ts`, `state.ts
 
 **Traces**
 
-- [ ] **2.11 No trace limits** (CR 10.8.2-3). The Corp may spend any amount and so may the Runner. Now: the Corp is capped at 15 and the Ghost is offered only enough to match (`traceActions`, ruling 29). Use a stepper in the UI (see the task 1 follow-up) so large amounts stay usable.
+- [x] **2.11 No trace limits** (CR 10.8.2-3). The Corp may spend any amount and so may the Runner. Now: the Corp is capped at 15 and the Ghost is offered only enough to match (`traceActions`, ruling 29). Use a stepper in the UI (see the task 1 follow-up) so large amounts stay usable.
 
 **Turn structure**
 

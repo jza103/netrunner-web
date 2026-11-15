@@ -391,7 +391,8 @@ function Game(props: {
             </div>
           </section>
 
-          {myMove && (
+          {myMove && v.trace && <TraceStepper v={v} max={legal.filter((a) => a.type === 'traceBoost').length - 1} act={act} />}
+          {myMove && !v.trace && (
             <div class="actionbar" role="group" aria-label="Your moves">
               {barActions.map((a, i) => (
                 <button key={i} class={primary(a) ? 'primary' : ''} onClick={() => act(a)}>
@@ -468,6 +469,33 @@ function Scoreboard({ v, me, who, open }: { v: GameState; me: Side; who: Side | 
     <div class="scores">
       {box('corp')}
       {box('ghost')}
+    </div>
+  );
+}
+
+/** Pay any amount toward a trace: a stepper rather than one button per amount. The Ghost starts at the amount that matches the trace. */
+function TraceStepper({ v, max, act }: { v: GameState; max: number; act: (a: Action) => void }) {
+  const t = v.trace!;
+  const corp = t.corpBoost === null;
+  const match = corp ? 0 : Math.min(max, Math.max(0, t.base + (t.corpBoost ?? 0) - link(v)));
+  const [n, setN] = useState(match);
+  useEffect(() => setN(match), [v.seq]);
+  const total = corp ? t.base + n : link(v) + n;
+  return (
+    <div class="actionbar" role="group" aria-label="Trace">
+      <span class="stepper">
+        <button aria-label="pay less" disabled={n <= 0} onClick={() => setN(n - 1)}>
+          −
+        </button>
+        <b>{n}¢</b>
+        <button aria-label="pay more" disabled={n >= max} onClick={() => setN(n + 1)}>
+          +
+        </button>
+      </span>
+      <span class="muted small">{corp ? `trace ${total}` : `link ${total} against trace ${t.base + (t.corpBoost ?? 0)}${total >= t.base + (t.corpBoost ?? 0) ? ': evaded' : ''}`}</span>
+      <button class="primary" onClick={() => act({ type: 'traceBoost', n })}>
+        {describeAction(v, { type: 'traceBoost', n })}
+      </button>
     </div>
   );
 }

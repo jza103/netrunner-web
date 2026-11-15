@@ -1,6 +1,6 @@
 // The single source of truth for what may be done. apply() accepts exactly these actions.
 import { cardOf, ensureCards, targetedEffect } from './cards';
-import { actor, available, breakerStrength, canBreak, canDevelop, currentIce, hostsWithRoom, iceStrength, isSite, link, ramLimit, ramUsed, rigOf } from './state';
+import { actor, available, breakerStrength, canBreak, canDevelop, currentIce, hostsWithRoom, iceStrength, isSite, ramLimit, ramUsed, rigOf } from './state';
 import { type Action, type CardDef, type CardId, type GameState, type NodeId, type PlayCondition, type PriorityWindow, type Side } from './types';
 
 export function conditionHolds(s: GameState, c: PlayCondition | undefined): boolean {
@@ -253,17 +253,9 @@ function runActions(s: GameState): Action[] {
   }
 }
 
-const TRACE_MAX = 15;
-
-/** The Corp may pay any amount it can (up to 15) to raise the trace; the Ghost only up to what beating it takes. */
+/** Each side may pay any amount it can toward a trace: the Corp first, then the Ghost (CR 10.8). */
 function traceActions(s: GameState, who: 'corp' | 'ghost'): Action[] {
-  const t = s.trace!;
-  if (who === 'corp') {
-    const most = Math.min(TRACE_MAX, available(s, 'corp', 'trace'));
-    return Array.from({ length: most + 1 }, (_, n) => ({ type: 'traceBoost', n }));
-  }
-  const need = Math.max(0, t.base + (t.corpBoost ?? 0) - link(s));
-  const most = Math.min(need, available(s, 'ghost', 'trace'));
+  const most = available(s, who, 'trace');
   return Array.from({ length: most + 1 }, (_, n) => ({ type: 'traceBoost', n }));
 }
 

@@ -748,9 +748,9 @@ function traceChoice(v: GameState, side: Side, legal: Action[]): Action {
     const n = !style.traceBid ? Math.min(most, 1) : target <= 0 ? 0 : target <= Math.min(most, Math.max(0, v.corp.credits - 2), 6) ? target : 0;
     return { type: 'traceBoost', n };
   }
-  // the Ghost is offered exactly up to what it takes to evade
-  const need = most;
-  return { type: 'traceBoost', n: need <= 4 && need <= available(v, 'ghost', 'trace') ? need : 0 };
+  // the Ghost matches the trace when that is cheap enough
+  const need = Math.max(0, t.base + (t.corpBoost ?? 0) - link(v));
+  return { type: 'traceBoost', n: need <= 4 && need <= most ? need : 0 };
 }
 
 /** Choose an action for whoever must act in this view. */

@@ -86,7 +86,7 @@ A Corp window where the Corp has nothing it could activate is skipped; the app m
 
 ## Traces
 
-Some ICE subroutines and Corp directives say **Trace N**. The Corp first pays any number of credits to raise N. Then the Ghost pays any number to raise their **link** (from their identity and gear). If the trace ends higher than the link, its "if successful" effect happens; a tie goes to the Ghost. The app only offers the Ghost as much as it takes to match the trace.
+Some ICE subroutines and Corp directives say **Trace N**. The Corp first pays any number of credits to raise N. Then the Ghost pays any number to raise their **link** (from their identity and gear). If the trace ends higher than the link, its "if successful" effect happens; a tie goes to the Ghost. Each side may pay any amount it has; the app starts the Ghost's stepper at the amount that matches the trace.
 
 ## Bad publicity
 

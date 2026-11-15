@@ -701,15 +701,15 @@ describe('damage kinds', () => {
 });
 
 describe('traces and link', () => {
-  it('the Corp boosts first, then the Ghost; a tie goes to the Ghost; the Ghost is only offered what beating it takes', () => {
+  it('the Corp boosts first, then the Ghost; each may pay any amount (CR 10.8); a tie goes to the Ghost', () => {
     let s = corpTurn(blank(), 20);
     s.ghostSuccessLastTurn = true;
     const [c] = hand(s, 'corp', 'records-request');
     s = act(s, { type: 'play', card: c });
-    expect(legalActions(s)).toHaveLength(16); // 0..15
+    expect(legalActions(s)).toHaveLength(21 - (cardOf(c).cost ?? 0)); // 0 up to every credit left
     s = act(s, { type: 'traceBoost', n: 0 }); // trace 4, link 0
     s.ghost.credits = 10;
-    expect(legalActions(s).map((a) => (a as { n: number }).n)).toEqual([0, 1, 2, 3, 4]);
+    expect(legalActions(s).map((a) => (a as { n: number }).n)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     s = act(s, { type: 'traceBoost', n: 4 }); // link 4 ties: the Ghost evades
     expect(s.ghost.heat).toBe(0);
     expect(s.trace).toBeNull();

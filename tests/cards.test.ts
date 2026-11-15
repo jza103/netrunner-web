@@ -663,7 +663,7 @@ describe('identities, traces, bad publicity, viruses, bypass, recurring credits,
     expect(legalActions(s)).toEqual([0, 1, 2].map((n) => ({ type: 'traceBoost', n })));
     s = act(s, { type: 'traceBoost', n: 1 }); // trace 4 against link 0
     expect(actor(s)).toBe('ghost');
-    expect(legalActions(s)).toHaveLength(5); // pay 0 to 4
+    expect(legalActions(s)).toHaveLength(s.ghost.credits + 1); // pay any amount up to every credit (CR 10.8.3)
     s = act(s, { type: 'traceBoost', n: 4 }); // link 4: the trace fails
     expect(s.ghost.heat).toBe(0);
     expect(s.run).toBeNull(); // the second subroutine still ends the run
