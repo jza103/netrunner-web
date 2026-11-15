@@ -142,6 +142,8 @@ export interface CardDef {
   onCorpScore?: Effect[];
   /** Corp identity: effects whenever the Ghost steals a project */
   onSteal?: Effect[];
+  /** identity: the smallest deck it can be played with (CR 1.4.3); 40 when left out */
+  minDeck?: number;
 }
 
 /** A set of custom cards, loaded from JSON. See reference/CARD_PACKS.md. */

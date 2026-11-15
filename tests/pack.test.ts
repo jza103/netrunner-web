@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest';
 import sample from '../packs/sample-pack.json';
 import { simulate } from '../src/bots/driver';
 import { apply } from '../src/engine/actions';
-import { cardOf, deckList, defaultDeck, nameOf } from '../src/engine/cards';
+import { CARDS, cardOf, deckList, defaultDeck, nameOf } from '../src/engine/cards';
 import { violations } from '../src/engine/invariants';
 import { legalActions } from '../src/engine/legal';
-import { builtInPack, deckPool, deckProblems, exportPack, loadPack, parsePack } from '../src/engine/pack';
+import { builtInPack, deckPool, deckProblems, exportPack, loadPack, parsePack, pointsRange } from '../src/engine/pack';
 import { newGame, nodeOf } from '../src/engine/state';
 import type { GameSetup } from '../src/engine/types';
 import { viewFor } from '../src/engine/view';
@@ -62,8 +62,9 @@ describe('loading packs', () => {
     expect(setupOf(changed).cards.find((c) => c.name === 'Pry Bar')!.id).not.toBe(a.id);
   });
   it('explicit deck lists can mix pack and built-in cards', () => {
-    const setup = setupOf({ ...sample, decks: { ghost: { 'pry-bar': 3, 'skeleton-key': 3, stiletto: 3, 'fast-money': 3, 'market-stall': 3 } } });
-    expect(deckList('ghost', setup)).toHaveLength(15);
+    const ghost = { ...defaultDeck('ghost'), 'pry-bar': 3, 'fast-money': 3, 'market-stall': 3 };
+    const setup = setupOf({ ...sample, decks: { ghost } });
+    expect(deckList('ghost', setup)).toHaveLength(Object.values(ghost).reduce((a, b) => a + b, 0));
     expect(counts(setup, 'ghost')['Fast Money']).toBe(3);
     expect(counts(setup, 'corp')['Toll Booth']).toBe(2); // the Corp side was left out: built-in plus pack
   });
@@ -80,14 +81,16 @@ describe('loading packs', () => {
     expect(errorsOf({ name: 'p', cards: [stunt(), stunt()] })).toMatch(/used twice/);
     expect(errorsOf({ name: 'p', cards: [], decks: { ghost: { 'no-such': 20 } } })).toMatch(/no card "no-such"/);
     expect(errorsOf({ name: 'p', cards: [], decks: { ghost: { tripwire: 20 } } })).toMatch(/"tripwire" is a corp card/);
-    expect(errorsOf({ name: 'p', cards: [], decks: { ghost: { crowbar: 3 } } })).toMatch(/needs at least 15/);
+    expect(errorsOf({ name: 'p', cards: [], decks: { ghost: { crowbar: 3 } } })).toMatch(/need at least 40/);
+    expect(errorsOf({ name: 'p', cards: [], decks: { ghost: { ...defaultDeck('ghost'), crowbar: 4 } } })).toMatch(/4 copies of Crowbar; the most is 3/);
+    expect(errorsOf({ name: 'p', cards: [], decks: { corp: { ...defaultDeck('corp'), 'skyhook-contract': 0 } } })).toMatch(/project points; it needs \d+ or \d+/);
     expect(errorsOf({ name: 'p', cards: [{ id: 'w', name: 'W', side: 'corp', type: 'ice', copies: 1, cost: 1, text: '' }] })).toMatch(/subtype.*\n.*strength.*\n.*subroutine/);
   });
   it('edited decks export as a pack that loads back to the same decks', () => {
     const setup = setupOf(sample);
     const edited = { ...setup, packName: 'Edited', decks: structuredClone(setup.decks) };
     const pry = setup.cards.find((c) => c.name === 'Pry Bar')!.id;
-    edited.decks.ghost[pry] = 4;
+    edited.decks.ghost[pry] = 3;
     delete edited.decks.ghost.crowbar;
     expect(deckProblems(edited.decks, edited.cards).errors).toEqual([]);
     const back = setupOf(JSON.parse(JSON.stringify(exportPack(edited))));
@@ -98,9 +101,18 @@ describe('loading packs', () => {
     expect(pool.filter((c) => c.name === 'Fast Money')).toHaveLength(1);
     expect(pool.some((c) => c.type === 'identity')).toBe(false);
   });
-  it('warns about decks that cannot be won on points', () => {
-    const r = loadPack({ name: 'p', cards: [], decks: { corp: { tripwire: 3, bulkhead: 3, riddlegate: 3, 'shell-company': 3, 'quarterly-windfall': 3 } } });
-    expect(r.ok && r.warnings.join(' ')).toMatch(/project points/);
+  it('follows the Netrunner deck rules (CR 1.4): identity minimum, 3 copies, project points by deck size', () => {
+    expect(pointsRange(40)).toEqual([18, 19]);
+    expect(pointsRange(49)).toEqual([20, 21]);
+    expect(pointsRange(54)).toEqual([22, 23]);
+    expect(pointsRange(60)).toEqual([26, 27]);
+    expect(deckProblems({ corp: defaultDeck('corp'), ghost: defaultDeck('ghost') }, []).errors).toEqual([]);
+    // a pack identity can ask for a bigger deck
+    const big = { id: 'big-corp', name: 'Big Corp', side: 'corp', type: 'identity', copies: 1, minDeck: 60, text: '' };
+    expect(errorsOf({ name: 'p', cards: [big] })).toMatch(/identities need at least 60/);
+    const ghost = Object.fromEntries(Object.entries(defaultDeck('ghost')).filter(([id]) => !CARDS.find((c) => c.id === id)?.breaker));
+    const noBreakers = loadPack({ name: 'p', cards: [], decks: { ghost } }, { checkDecks: false });
+    expect(noBreakers.ok && noBreakers.warnings.join(' ')).toMatch(/no breakers/);
   });
 });
 

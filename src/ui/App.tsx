@@ -1047,7 +1047,7 @@ function DeckSheet({ setup, save, close }: { setup: GameSetup; save: (p: GameSet
           </button>
         </header>
         <p class="small muted">
-          {tab === 'corp' ? `${pts} project points (7 to win). ` : ''}Decks need 15 to 120 cards; up to 9 copies of a card. Identities are picked when a game starts.
+          {tab === 'corp' ? `${pts} project points (7 to win). ` : ''}Netrunner deck rules: at least as many cards as the identities need (45 Corp, 40 Ghost for the built-in ones), at most 3 copies of a card, and a Corp deck needs 2 project points per full 5 cards plus 2 or 3 (22 or 23 for 50 to 54 cards). Identities are picked when a game starts.
         </p>
         <div class="deckgrid">
           {types.map((type) => (
@@ -1067,7 +1067,7 @@ function DeckSheet({ setup, save, close }: { setup: GameSetup; save: (p: GameSet
                           −
                         </button>
                         <b>{n}</b>
-                        <button aria-label={`more ${d.name}`} disabled={n >= 9} onClick={() => set(d.id, n + 1)}>
+                        <button aria-label={`more ${d.name}`} disabled={n >= 3} onClick={() => set(d.id, n + 1)}>
                           +
                         </button>
                       </span>

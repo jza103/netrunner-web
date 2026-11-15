@@ -71,7 +71,7 @@ The audit compared the CR with `src/engine` (`legal.ts`, `actions.ts`, `state.ts
 
 **Deck construction** (CR 1.4)
 
-- [ ] **2.15 Deck limits.** At most 3 copies of a card; the identity sets the minimum deck size (usually 40 or 45); a Corp deck needs 2 × (deck size ÷ 5, rounded down) + 2 or + 3 project points, e.g. 22 or 23 for 50 to 54 cards. Factions and influence stay out of scope (SPEC). Now: 15 to 120 cards and up to 9 copies, with only a warning for points. The built-in decks already fit (50 Corp cards with 22 points, 45 Ghost cards, at most 3 copies). Add a minimum deck size to identities, enforce the limits in the deck builder and in pack checks, and update `reference/CARD_PACKS.md`.
+- [x] **2.15 Deck limits.** At most 3 copies of a card; the identity sets the minimum deck size (usually 40 or 45); a Corp deck needs 2 × (deck size ÷ 5, rounded down) + 2 or + 3 project points, e.g. 22 or 23 for 50 to 54 cards. Factions and influence stay out of scope (SPEC). Now: 15 to 120 cards and up to 9 copies, with only a warning for points. The built-in decks already fit (50 Corp cards with 22 points, 45 Ghost cards, at most 3 copies). Add a minimum deck size to identities, enforce the limits in the deck builder and in pack checks, and update `reference/CARD_PACKS.md`.
 
 **Engine limits that block faithful card designs** (not rule differences, but they keep pack cards from working like real Netrunner cards)
 

@@ -58,7 +58,7 @@ const plain = loadPack({
     corp: Object.fromEntries(Object.entries(defaultDeck('corp')).map(([id, n]) => [id, Math.max(n, 3)])),
     ghost: Object.fromEntries(Object.entries(defaultDeck('ghost')).map(([id, n]) => [id, Math.max(n, 3)])),
   },
-});
+}, { checkDecks: false });
 if (!plain.ok) throw new Error(plain.errors.join('; '));
 export const PLAIN: GameSetup = plain.setup;
 

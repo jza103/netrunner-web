@@ -22,7 +22,7 @@ Custom cards are played by the same engine code as the built-in cards. A card's 
 - **A card with the same `id` as a built-in card replaces it.** To drop a built-in card from a deck, replace it with `"copies": 0`.
 - **decks** (optional): a side's deck list, as card id → copies. Ids can be pack cards (looked up first) or built-in cards of that side.
   - A side you leave out uses the built-in deck, with your replacements, plus every new pack card for that side at its `copies`.
-  - Each deck needs 15 to 120 cards. You get a warning, but can still play, if the Corp deck has fewer than 7 project points or the Ghost deck has no breakers.
+  - Decks follow the Netrunner deck rules: at least as many cards as every identity of that side needs (`minDeck`, 40 when left out; the built-in Corp identities need 45), at most 3 copies of any card, and a Corp deck needs 2 project points for every full 5 cards plus 2 or 3 (for example 22 or 23 for 50 to 54 cards). A pack that breaks these does not load. You get a warning, but can still play, if the Ghost deck has no breakers.
 
 Inside a game, pack cards get ids like `x1a2b3c4d-my-card`, where the hex is a hash of the card's content. That's why one id always means one definition and saved games replay exactly. You never need to write these ids yourself.
 
@@ -33,7 +33,7 @@ Inside a game, pack cards get ids like `x1a2b3c4d-my-card`, where the hex is a h
 | `id`, `name`, `text` | required. `text` may be `""` for ICE and breakers, whose subroutine and breaker lines are generated. |
 | `side` | `"corp"` or `"ghost"` |
 | `type` | Corp: `project`, `ice`, `asset`, `upgrade`, `directive`, `identity`. Ghost: `program`, `gear`, `contact`, `stunt`, `identity`. |
-| `copies` | 0 to 20 |
+| `copies` | 0 to 20 (a deck holds at most 3) |
 | `cost` | credits to install, play or activate. Every type except `project` and `identity` needs one. |
 
 Numbers are whole numbers from 0 to 20. Any field not listed here is rejected, which catches typos.
@@ -57,7 +57,7 @@ Numbers are whole numbers from 0 to 20. Any field not listed here is rejected, w
 
 **directive** (Corp) and **stunt** (Ghost): `onPlay` effects, optional `playIf` (`"ghostHasHeat"` or `"ghostRanLastTurn"`). A directive can also have `removeAfterPlay: true`.
 
-**identity**: never in a deck; chosen when a game starts (a pack's first identity per side is the default). It can have `link` (Ghost), `onTurnStart`, `recurring`, `handBonus`, `ramBonus`, `prevent`, `mainframeAccess`, `onFirstSuccessfulRun` (Ghost), `onCorpScore` (Corp: whenever the Corp scores a project) and `onSteal` (Corp: whenever the Ghost steals one).
+**identity**: never in a deck; chosen when a game starts (a pack's first identity per side is the default). `minDeck` sets the smallest deck it can play with (default 40). It can have `link` (Ghost), `onTurnStart`, `recurring`, `handBonus`, `ramBonus`, `prevent`, `mainframeAccess`, `onFirstSuccessfulRun` (Ghost), `onCorpScore` (Corp: whenever the Corp scores a project) and `onSteal` (Corp: whenever the Ghost steals one).
 
 **program**: `ram`, and optionally `breaker`:
 `{ "breaks": "wall" | "cipher" | "hunter" | "any", "strength": 1, "boostCost": 1, "boostBy": 1, "breakCost": 1 }`
@@ -75,7 +75,7 @@ Numbers are whole numbers from 0 to 20. Any field not listed here is rejected, w
   - `virusAccess: N` gives +1 Mainframe access for every N counters.
   - `virusSpend: true` lets the Ghost spend a counter while encountering ICE, for -1 ICE strength in that encounter.
 - **gear** only: `host: { "max": 1, "breakerStrength": 1 }`. It can host programs, which use no RAM; a hosted breaker gets the extra strength.
-- `ability`: `{ "cycles": 0 or 1, "credits": 0, "trashSelf": false, "if": "ghostHasHeat", "effects": [...] }`. The Ghost uses it on their turn. `credits`, `trashSelf` and `if` are optional.
+- `ability`: `{ "cycles": 0 or 1, "credits": 0, "trashSelf": false, "if": "ghostHasHeat", "ownTurn": false, "effects": [...] }`. With 1 cycle it is an action on the Ghost's turn. With 0 cycles it can be used in any window, on either turn and during runs, unless `ownTurn` is true (then only on the Ghost's turn, runs included). `credits`, `trashSelf`, `if` and `ownTurn` are optional.
 
 ## Effects
 

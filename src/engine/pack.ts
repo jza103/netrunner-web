@@ -25,6 +25,7 @@ const FIELDS: Record<string, CardType[]> = {
   host: ['gear'],
   onCorpScore: ['identity'],
   onSteal: ['identity'],
+  minDeck: ['identity'],
   dev: ['project'],
   points: ['project'],
   stealCost: ['project'],
@@ -172,6 +173,7 @@ function checkCard(raw: unknown, i: number, errs: string[]): CardDef | null {
     if (!(k in FIELDS)) errs.push(`${at}: unknown field "${k}"`);
     else if (!FIELDS[k].includes(type)) errs.push(`${at}: a ${type} cannot have "${k}"`);
   }
+  if (raw.minDeck !== undefined && !(isCount(raw.minDeck, 200) && Number(raw.minDeck) >= 1)) errs.push(`${at}: minDeck must be a whole number from 1 to 200`);
   for (const k of ['cost', 'dev', 'points', 'stealCost', 'strength', 'trash', 'iceStrength', 'ram', 'ramBonus', 'handBonus', 'mainframeAccess'])
     if (raw[k] !== undefined && !isCount(raw[k], 20)) errs.push(`${at}: ${k} must be a whole number from 0 to 20`);
   for (const k of ['developable', 'trap', 'removeAfterPlay']) if (raw[k] !== undefined && typeof raw[k] !== 'boolean') errs.push(`${at}: ${k} must be true or false`);
@@ -246,7 +248,11 @@ function checkCard(raw: unknown, i: number, errs: string[]): CardDef | null {
 }
 
 /** Check a pack and build the setup for a game with it. */
-export function loadPack(raw: unknown): PackResult {
+/**
+ * Check a pack and build its setup. `checkDecks: false` skips the deck-building rules (copy limit,
+ * minimum size, project points); only tests use it, to have spare copies of every card.
+ */
+export function loadPack(raw: unknown, opts: { checkDecks?: boolean } = {}): PackResult {
   const errs: string[] = [];
   const warnings: string[] = [];
   if (!isObj(raw)) return { ok: false, errors: ['A pack must be a JSON object with "name" and "cards".'] };
@@ -310,7 +316,7 @@ export function loadPack(raw: unknown): PackResult {
 
   const problems = deckProblems(decks, cards);
   warnings.push(...problems.warnings);
-  if (problems.errors.length) return { ok: false, errors: problems.errors };
+  if (problems.errors.length && opts.checkDecks !== false) return { ok: false, errors: problems.errors };
 
   // the pack's first identity for each side, else the built-in default
   const identities = defaultIdentities();
@@ -339,18 +345,29 @@ export function parsePack(text: string): PackResult {
   return loadPack(raw);
 }
 
-/** Deck size limits, and warnings for decks that cannot be won on points or have no breakers. */
+/** Project points a Corp deck of this size must hold: 2 per full 5 cards, plus 2 or 3 (CR 1.4.6). */
+export function pointsRange(size: number): [number, number] {
+  const low = 2 * Math.floor(size / 5) + 2;
+  return [low, low + 1];
+}
+
+/** The Netrunner deck-building rules (CR 1.4), minus factions and influence, and warnings for decks with no breakers. */
 export function deckProblems(decks: Record<Side, Record<string, number>>, custom: CardDef[]): { errors: string[]; warnings: string[] } {
   const errors: string[] = [];
   const warnings: string[] = [];
+  const all = [...CARDS.filter((c) => !custom.some((x) => strip(x.id) === c.id)), ...custom];
   const byId = new Map([...CARDS, ...custom].map((c) => [c.id, c]));
   for (const side of ['corp', 'ghost'] as const) {
     const size = Object.values(decks[side]).reduce((a, b) => a + b, 0);
-    if (size < 15) errors.push(`the ${side} deck has ${size} cards; it needs at least 15`);
-    if (size > 120) errors.push(`the ${side} deck has ${size} cards; the most is 120`);
+    // identities are picked when a game starts, so the deck must suit every one of them
+    const min = Math.max(0, ...all.filter((c) => c.side === side && c.type === 'identity').map((c) => c.minDeck ?? 40));
+    if (size < min) errors.push(`the ${side} deck has ${size} cards; its identities need at least ${min}`);
+    for (const [id, k] of Object.entries(decks[side])) if (k > 3) errors.push(`the ${side} deck has ${k} copies of ${byId.get(id)?.name ?? id}; the most is 3`);
   }
+  const size = Object.values(decks.corp).reduce((a, b) => a + b, 0);
   const pts = Object.entries(decks.corp).reduce((n, [id, k]) => n + (byId.get(id)?.points ?? 0) * k, 0);
-  if (pts < 7) warnings.push(`the Corp deck has only ${pts} project points, so no one can win on points (the game ends when the Mainframe runs out)`);
+  const [lo, hi] = pointsRange(size);
+  if (pts < lo || pts > hi) errors.push(`the Corp deck has ${size} cards and ${pts} project points; it needs ${lo} or ${hi}`);
   const breakers = Object.entries(decks.ghost).filter(([id, k]) => k > 0 && byId.get(id)?.breaker);
   if (!breakers.length) warnings.push('the Ghost deck has no breakers, so any active "end the run" stops every run');
   return { errors, warnings };

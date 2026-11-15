@@ -1,8 +1,8 @@
 [
-  { "id": "helix-dynamics", "name": "Helix Dynamics", "side": "corp", "type": "identity", "copies": 1,
+  { "id": "helix-dynamics", "name": "Helix Dynamics", "side": "corp", "type": "identity", "copies": 1, "minDeck": 45,
     "onCorpScore": [{ "op": "gain", "n": 2 }],
     "text": "Identity. Whenever you score a project, gain 2 credits." },
-  { "id": "vigil-systems", "name": "Vigil Systems", "side": "corp", "type": "identity", "copies": 1,
+  { "id": "vigil-systems", "name": "Vigil Systems", "side": "corp", "type": "identity", "copies": 1, "minDeck": 45,
     "onSteal": [{ "op": "heat", "n": 1 }],
     "text": "Identity. Whenever the Ghost steals a project, they gain 1 heat." },
 
@@ -87,10 +87,10 @@
     "onPlay": [{ "op": "recycleDump" }],
     "text": "Shuffle your Dump into your Mainframe. Remove Recall from the game." },
 
-  { "id": "wren-ortiz", "name": "Wren \"Static\" Ortiz", "side": "ghost", "type": "identity", "copies": 1, "link": 1,
+  { "id": "wren-ortiz", "name": "Wren \"Static\" Ortiz", "side": "ghost", "type": "identity", "copies": 1, "minDeck": 40, "link": 1,
     "onFirstSuccessfulRun": [{ "op": "gain", "n": 1 }],
     "text": "Identity. Link 1. The first time you make a successful run each turn, gain 1 credit." },
-  { "id": "halcyon", "name": "Halcyon", "side": "ghost", "type": "identity", "copies": 1, "link": 0, "handBonus": 1,
+  { "id": "halcyon", "name": "Halcyon", "side": "ghost", "type": "identity", "copies": 1, "minDeck": 40, "link": 0, "handBonus": 1,
     "text": "Identity. Link 0. +1 maximum hand size." },
 
   { "id": "rot-crawler", "name": "Rot Crawler", "side": "ghost", "type": "program", "copies": 1, "cost": 2, "ram": 1, "virusOn": "mainframe", "virusAccess": 2,
