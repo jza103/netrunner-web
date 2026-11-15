@@ -116,7 +116,7 @@ export function damage(s: GameState, n: number, source: string, kind: DamageKind
   g.discard.push(...lost);
   if (kind === 'core') g.core += n;
   const tail = kind === 'core' ? ` Their maximum hand size is now ${maxHand(s, 'ghost')}.` : '';
-  emit(s, 'damage', 'corp', `${source} deals ${n} ${kind} damage. The Ghost loses ${lost.map(nameOf).join(', ')}.${tail}`);
+  emit(s, 'damage', 'corp', `${source} deals ${n} ${kind} damage. The Ghost trashes ${lost.map(nameOf).join(', ')} at random.${tail}`);
 }
 
 function addHeat(s: GameState, n: number) {

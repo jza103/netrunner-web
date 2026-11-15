@@ -39,7 +39,7 @@ docker compose up
 - First to 7 project points wins. The Corp scores projects by developing them; the Ghost steals them by running.
 - The Corp has 3 cycles a turn, the Ghost 4. A cycle buys a credit, a card, an install, a card play or (for the Ghost) a run.
 - ICE protects nodes. The Corp installs it facedown and pays to activate it when the Ghost runs into it. The Ghost needs a breaker of the matching type (wall, cipher, hunter) to break its subroutines.
-- Damage makes the Ghost discard at random; more damage than cards in hand is a loss. Heat on the Ghost powers the Corp's nastiest cards.
+- Damage makes the Ghost trash cards at random from hand; more damage than cards in hand is a loss. Heat on the Ghost powers the Corp's nastiest cards.
 
 In the app: tap any card to read it and see what you can do with it. The bar at the bottom lists every other legal move. The engine only ever offers legal moves.
 
@@ -101,7 +101,7 @@ Where the rules or a card could be read two ways, this is what the engine does.
 18. **Trashing as part of an install** (CR 8.5.6). Installing ICE, the Corp may first trash any ICE on that node; they do not count toward the cost. Installing into a root, it may first trash any cards in that root; a project or asset always replaces the old one. Installing a program, the Ghost may trash any programs and must trash enough to fit. The app offers these as "install, trashing first": pick the cards, then finish or take the install back (the cycle is spent when it finishes). Trashed Corp cards go to the Dump faceup if active, facedown if not.
 19. **No limits on ICE or sites.** A site with nothing in it or protecting it is removed at once (CR 8.5.8), except the one being run until the run ends. Programs over the RAM limit (if RAM drops) must be trashed at once (CR 3.9.3c).
 20. **Mulligan** is once per side, decided Corp first.
-21. **Damage kinds.** Net, meat and core damage all discard at random, and more than the Ghost's hand flatlines them. Core damage also lowers the Ghost's maximum hand size by 1 per point for the rest of the game. A maximum hand size below 0 at the end of the Ghost's turn flatlines them; exactly 0 means discarding everything.
+21. **Damage kinds.** Net, meat and core damage all trash cards at random from hand (CR 10.4.2; trashing is not discarding), and more than the Ghost's hand flatlines them. Core damage also lowers the Ghost's maximum hand size by 1 per point for the rest of the game. A maximum hand size below 0 at the end of the Ghost's turn flatlines them; exactly 0 means discarding everything in the discard step.
 22. **Upgrades** install for 1 cycle in any node, central or site, alongside whatever is there; a node may hold any number. Installing a project or asset over a site's root card does not touch its upgrades. A site holding only an upgrade can be run.
 23. **Access order.** The Ghost chooses the order of accesses (CR 7.3.4): any card in the node's root (the site's card and any upgrades), or the next card from Command (random) or the Mainframe (from the top). When only one choice is left the engine takes it. The Corp does not see cards accessed from the Mainframe (CR 7.1.2).
 24. **Lockout Relay** triggers when the Ghost approaches the node, after the last ICE, the Ghost's chance to jack out and the Corp's last window (so one activated in that window triggers at once). It does not trigger if the run never gets that far.

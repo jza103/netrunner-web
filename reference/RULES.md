@@ -106,7 +106,7 @@ Some Ghost cards **bypass** ICE: when the Ghost would encounter that ICE, they g
 
 ## Damage and heat
 
-- **Damage** comes in three kinds. Each makes the Ghost discard that many cards at random from hand, and more damage than cards in hand means the Ghost is flatlined and loses.
+- **Damage** comes in three kinds. Each makes the Ghost **trash** that many cards at random from hand (trashed, not discarded: cards that care about one do not see the other), and more damage than cards in hand means the Ghost is flatlined and loses.
   - **Net damage** usually comes from hunter ICE and traps.
   - **Meat damage** usually comes from Corp directives that punish heat.
   - **Core damage** also lowers the Ghost's maximum hand size by 1 per point, for the rest of the game. If the Ghost's maximum hand size is below 0 at the end of their turn, they are flatlined.

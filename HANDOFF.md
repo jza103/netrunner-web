@@ -66,8 +66,8 @@ The audit compared the CR with `src/engine` (`legal.ts`, `actions.ts`, `state.ts
 
 **Damage and wording**
 
-- [ ] **2.13 Damage trashes cards** (CR 10.4.2, 1.19.3, 5.5.2b). Damage *trashes* random cards from the grip; it is not a discard, and the difference matters to card text. Now: `reference/RULES.md` and the log say "discard". Fix the wording, and make sure any "when trashed" or "when discarded" effect sees the right one.
-- [ ] **2.14 Breaker types in `reference/RULES.md`** (CR 3.9.5h). A breaker that names no ICE type works on any ICE. The engine already does this (Jackknife), but RULES.md says a breaker only works on its own type. Docs fix only.
+- [x] **2.13 Damage trashes cards** (CR 10.4.2, 1.19.3, 5.5.2b). Damage *trashes* random cards from the grip; it is not a discard, and the difference matters to card text. Now: `reference/RULES.md` and the log say "discard". Fix the wording, and make sure any "when trashed" or "when discarded" effect sees the right one.
+- [x] **2.14 Breaker types in `reference/RULES.md`** (CR 3.9.5h). A breaker that names no ICE type works on any ICE. The engine already does this (Jackknife), but RULES.md says a breaker only works on its own type. Docs fix only.
 
 **Deck construction** (CR 1.4)
 
