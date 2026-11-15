@@ -27,6 +27,8 @@ export function newGame(opts: NewGameOptions): GameState {
     phase: 'mulligan',
     mulligan: 'corp',
     trace: null,
+    window: null,
+    inAction: false,
     corp: {
       identity: `${setup.identities.corp}#1`,
       credits: 5,
@@ -99,6 +101,7 @@ export function nodeOf(s: GameState, id: NodeId): NodeState {
 export function actor(s: GameState): Side | null {
   if (s.phase === 'gameOver') return null;
   if (s.trace) return s.trace.corpBoost === null ? 'corp' : 'ghost';
+  if (s.window) return s.window.who;
   if (s.phase === 'mulligan') return s.mulligan;
   if (s.phase === 'run' && s.run) return ['initiation', 'approach', 'moveIn', 'approachNode', 'corpTrash'].includes(s.run.step) ? 'corp' : 'ghost';
   return s.turn;

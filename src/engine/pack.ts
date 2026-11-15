@@ -220,11 +220,11 @@ function checkCard(raw: unknown, i: number, errs: string[]): CardDef | null {
   }
   if (raw.ability !== undefined) {
     const a = raw.ability;
-    if (!isObj(a) || (a.cycles !== 0 && a.cycles !== 1) || (a.credits !== undefined && !isCount(a.credits, 20)) || (a.trashSelf !== undefined && typeof a.trashSelf !== 'boolean'))
-      errs.push(`${at}: ability needs cycles (0 or 1), and optionally credits, trashSelf and if`);
+    if (!isObj(a) || (a.cycles !== 0 && a.cycles !== 1) || (a.credits !== undefined && !isCount(a.credits, 20)) || (a.trashSelf !== undefined && typeof a.trashSelf !== 'boolean') || (a.ownTurn !== undefined && typeof a.ownTurn !== 'boolean'))
+      errs.push(`${at}: ability needs cycles (0 or 1), and optionally credits, trashSelf, ownTurn and if`);
     else {
       if (a.if !== undefined && a.if !== 'ghostHasHeat' && a.if !== 'ghostRanLastTurn') errs.push(`${at}: ability.if must be "ghostHasHeat" or "ghostRanLastTurn"`);
-      for (const k of Object.keys(a)) if (!['cycles', 'credits', 'trashSelf', 'if', 'effects'].includes(k)) errs.push(`${at}: ability has no field "${k}"`);
+      for (const k of Object.keys(a)) if (!['cycles', 'credits', 'trashSelf', 'ownTurn', 'if', 'effects'].includes(k)) errs.push(`${at}: ability has no field "${k}"`);
       checkEffects(a.effects, 'plain', `${at} ability.effects`, errs);
     }
   }

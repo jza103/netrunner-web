@@ -3,7 +3,7 @@ import { CARDS, cardOf, deckList } from '../src/engine/cards';
 import { legalActions } from '../src/engine/legal';
 import { actor, maxHand, newGame, nodeOf, points } from '../src/engine/state';
 import { viewFor } from '../src/engine/view';
-import { act, actRaw, blank, corpTurn, ghostTurn, hand, ice, rejects, rig, site, take, upgrade } from './helpers';
+import { act, actRaw, blank, corpTurn, ghostTurn, hand, ice, passWindows, rejects, rig, site, take, upgrade } from './helpers';
 import { loadPack } from '../src/engine/pack';
 
 describe('card data', () => {
@@ -511,6 +511,88 @@ describe('the Corp window when a run reaches its node', () => {
     const { card: desk } = site(s, 'watch-desk');
     s = actRaw(s, { type: 'play', card: b, node: 'mainframe' });
     expect(legalActions(s)).toContainEqual({ type: 'activate', card: desk });
+  });
+});
+
+describe('priority windows outside runs (CR 5.6, 5.7)', () => {
+  it('the Corp may activate at the start of its turn, before the turn begins: a start-of-turn card then pays at once', () => {
+    let s = corpTurn(blank(), 1);
+    const { card: shell } = site(s, 'shell-company');
+    s.corp.cycles = 0;
+    s = act(s, { type: 'endTurn' });
+    // the Ghost's turn: the Corp gets windows, but has nothing worth doing; pass them
+    s = passWindows(s);
+    s.ghost.cycles = 0;
+    s = act(s, { type: 'endTurn' });
+    while (s.window && s.turn === 'ghost') s = actRaw(s, { type: 'pass' });
+    // the Corp's turn starts: its window comes before the draw and before Shell Company could trigger
+    expect(s.turn).toBe('corp');
+    expect(s.window).toMatchObject({ at: 'turnStart', who: 'corp' });
+    expect(legalActions(s)).toEqual([{ type: 'activate', card: shell }, { type: 'pass' }]);
+    const deck = s.corp.deck.length;
+    s = actRaw(s, { type: 'activate', card: shell });
+    expect(s.window).toBeNull();
+    expect(s.corp.credits).toBe(1); // paid 1, then gained 1 when the turn began
+    expect(s.corp.deck.length).toBe(deck - 1); // the draw comes after
+  });
+  it('the Corp may score in its start-of-turn window', () => {
+    let s = corpTurn(blank());
+    const { card } = site(s, 'skyhook-contract', { dev: 9 });
+    s.corp.cycles = 0;
+    s = act(s, { type: 'endTurn' });
+    expect(s.window).toBeNull();
+    s.ghost.cycles = 0;
+    s = act(s, { type: 'endTurn' });
+    expect(s.window).toMatchObject({ at: 'turnStart', who: 'corp' });
+    expect(legalActions(s)).toContainEqual({ type: 'score', card });
+  });
+  it('before each Ghost action the Corp may activate assets and upgrades; not after the last cycle', () => {
+    let s = ghostTurn(blank(), 5);
+    s.corp.credits = 1;
+    const { card: shell } = site(s, 'shell-company');
+    s = act(s, { type: 'credit' });
+    expect(s.window).toMatchObject({ at: 'beforeAction', who: 'corp' });
+    expect(actor(s)).toBe('corp');
+    s = actRaw(s, { type: 'pass' });
+    expect(actor(s)).toBe('ghost');
+    // a run is one action: the window opens once it is over
+    s = actRaw(s, { type: 'run', node: 'command' });
+    expect(s.window).toBeNull();
+    s = actRaw(s, { type: 'decline' }); // the run's initiation window
+    s = actRaw(s, { type: 'continue' });
+    s = actRaw(s, { type: 'decline' }); // the Corp's last window before the node
+    expect(s.run).toBeNull();
+    expect(s.window).toMatchObject({ at: 'beforeAction', who: 'corp' });
+    s = actRaw(s, { type: 'activate', card: shell });
+    expect(s.window).toBeNull(); // nothing more it could do
+    s = act(s, { type: 'credit' });
+    s = act(s, { type: 'credit' });
+    expect(s.ghost.cycles).toBe(0);
+    expect(s.window).toBeNull();
+  });
+  it('after discarding at the end of a turn, both sides get one last window', () => {
+    let s = ghostTurn(blank(), 5);
+    s.corp.credits = 1;
+    site(s, 'shell-company');
+    s.ghost.cycles = 0;
+    s = act(s, { type: 'endTurn' });
+    expect(s.window).toMatchObject({ at: 'turnEnd', who: 'corp' });
+    s = actRaw(s, { type: 'pass' });
+    expect(s.turn).toBe('corp');
+  });
+  it('Ghost abilities that cost no cycle work in run windows; "on your turn" ones only on the Ghost turn', () => {
+    let s = ghostTurn(blank(), 5);
+    s.ghost.heat = 2;
+    const [phone] = rig(s, 'burner-phone');
+    ice(s, 'command', 'bulkhead', true);
+    s = act(s, { type: 'run', node: 'command' });
+    expect(s.run!.step).toBe('encounter');
+    expect(legalActions(s)).toContainEqual({ type: 'use', card: phone });
+    let t = corpTurn(blank());
+    t.ghost.heat = 2;
+    rig(t, 'burner-phone');
+    t = act(t, { type: 'credit' });
+    expect(t.window).toBeNull();
   });
 });
 

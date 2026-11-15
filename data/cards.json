@@ -136,7 +136,7 @@
   { "id": "flak-vest", "name": "Flak Vest", "side": "ghost", "type": "gear", "copies": 1, "cost": 1, "prevent": { "meat": 2 },
     "text": "Each turn, prevent the first 2 meat damage you would take." },
   { "id": "burner-phone", "name": "Burner Phone", "side": "ghost", "type": "gear", "copies": 1, "cost": 1,
-    "ability": { "cycles": 0, "trashSelf": true, "if": "ghostHasHeat", "effects": [{ "op": "shedHeat", "n": 2 }] },
+    "ability": { "cycles": 0, "trashSelf": true, "if": "ghostHasHeat", "ownTurn": true, "effects": [{ "op": "shedHeat", "n": 2 }] },
     "text": "On your turn, trash this (no cycle): remove up to 2 heat." },
 
   { "id": "street-fence", "name": "Street Fence", "side": "ghost", "type": "contact", "copies": 3, "cost": 2,

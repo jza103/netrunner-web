@@ -482,6 +482,9 @@ function Prompt({ v, me, myMove, who }: { v: GameState; me: Side; myMove: boolea
       t.corpBoost === null
         ? `${t.source}: trace ${t.base} against the Ghost's link ${link(v)}. Pay to raise the trace; the Ghost answers after you.`
         : `${t.source}: the trace is ${t.base + t.corpBoost} against your link ${link(v)}. Pay to raise your link to match it, or let it land.`;
+  } else if (v.window) {
+    const when = v.window.at === 'turnStart' ? 'at the start of the turn' : v.window.at === 'turnEnd' ? 'at the end of the turn' : `before the ${sideName(v.turn)}'s next action`;
+    text = me === 'corp' ? `Your window ${when}: activate an asset or upgrade${v.turn === 'corp' && v.window.at === 'turnStart' ? ' or score a project' : ''}, or pass.` : `Your window ${when}: use a card ability, or pass.`;
   } else if (v.phase === 'mulligan') text = 'Opening hand: keep it, or shuffle it back for 5 new cards (once).';
   else if (v.phase === 'discard') text = `Discard down to ${maxHand(v, me)} cards: tap a card in your hand.`;
   else if (v.phase === 'run' && v.run) {

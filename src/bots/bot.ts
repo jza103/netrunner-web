@@ -766,6 +766,18 @@ export function chooseAction(v: GameState, level: BotLevel = 'hard'): Action {
     if (credit) return credit;
   }
   if (v.trace) return traceChoice(v, side, legal);
+  if (v.window) {
+    // the Corp scores at once, and switches on cards that pay at the start of its turn before the turn begins
+    if (side === 'corp') {
+      const score = pick(legal, 'score');
+      if (score) return score;
+      if (v.turn === 'corp' && v.window.at === 'turnStart') {
+        const early = pick(legal, 'activate', (a) => !!cardOf(a.card).onTurnStart?.length || !!cardOf(a.card).recurring);
+        if (early) return early;
+      }
+    }
+    return pick(legal, 'pass')!;
+  }
   if (v.phase === 'mulligan') {
     const hand = v[side].hand.map(cardOf);
     const bad =

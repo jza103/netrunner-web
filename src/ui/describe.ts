@@ -93,6 +93,8 @@ export function describeAction(s: GameState, a: Action): string {
       if (s.run?.step === 'approachNode') return '🙈 Activate nothing: let the Ghost in';
       if (s.run?.step === 'approach' && currentIce(s) && !currentIce(s)!.active) return '🙈 Leave it inactive';
       return '🙈 Activate nothing';
+    case 'pass':
+      return s.window?.who === 'corp' ? '⏩ Activate nothing now' : '⏩ Use nothing now';
     case 'trashContact':
       return `🔥 Trash their ${label(a.card)} (2¢)`;
     case 'run':

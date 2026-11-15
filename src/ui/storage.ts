@@ -8,7 +8,7 @@ import type { GameSetup, GameState } from '../engine/types';
  * fails until you do. A save in another format, or whose state does not have the current shape,
  * is set aside instead of crashing the app.
  */
-export const SAVE_FORMAT = 3;
+export const SAVE_FORMAT = 4;
 const KEY = 'breachline:save';
 /** where saves lived before the format field (format 2) */
 const LEGACY_KEY = 'breachline:save:v2';

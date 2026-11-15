@@ -31,6 +31,12 @@ export function act(s: GameState, a: Action): GameState {
   return next;
 }
 
+/** Pass every open priority window (outside runs). */
+export function passWindows(s: GameState): GameState {
+  while (s.window) s = actRaw(s, { type: 'pass' });
+  return s;
+}
+
 export function rejects(s: GameState, a: Action): string {
   const r = apply(s, a);
   expect(r.ok).toBe(false);

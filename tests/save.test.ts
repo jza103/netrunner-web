@@ -5,9 +5,9 @@ import { SAVE_FORMAT, parseSave, setCurrentShape, stateShape } from '../src/ui/s
 import { act, blank } from './helpers';
 
 /** The shape that SAVE_FORMAT describes. If this test fails, GameState changed: bump SAVE_FORMAT in src/ui/storage.ts and update both lines. */
-const FORMAT = 3;
+const FORMAT = 4;
 const SHAPE =
-  'state:corp,events,flags,gameId,ghost,ghostSuccessLastTurn,human,mulligan,phase,rngState,run,seq,setup,trace,turn,turnNumber,winReason,winner | corp:badPublicity,credits,cycles,deck,discard,discardSeen,hand,identity,nodes,recurring,removed,scored,siteCount | ghost:contacts,core,credits,cycles,deck,discard,gear,hand,heat,hosted,identity,known,programs,recurring,scored,virus | flags:prevented,successfulRun | setup:cards,decks,identities,packName | node:ice,id,root,upgrades';
+  'state:corp,events,flags,gameId,ghost,ghostSuccessLastTurn,human,inAction,mulligan,phase,rngState,run,seq,setup,trace,turn,turnNumber,winReason,window,winner | corp:badPublicity,credits,cycles,deck,discard,discardSeen,hand,identity,nodes,recurring,removed,scored,siteCount | ghost:contacts,core,credits,cycles,deck,discard,gear,hand,heat,hosted,identity,known,programs,recurring,scored,virus | flags:prevented,successfulRun | setup:cards,decks,identities,packName | node:ice,id,root,upgrades';
 
 describe('saved games', () => {
   setCurrentShape(stateShape(newGame({ seed: 0, human: 'ghost' })));

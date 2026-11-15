@@ -30,7 +30,11 @@ Each side shuffles its own deck, takes 5 credits and draws 5 cards. Each side, C
 
 The Corp gets **3 cycles** a turn and the Ghost gets **4**. Every cycle must be spent. At the end of your turn, discard down to your maximum hand size (5).
 
-**Corp turn.** First draw 1 card (mandatory, no cycle). Then spend cycles:
+**Turn order.** Each turn: gain your cycles; a window for both sides (yours first); your recurring credits refill and "when your turn begins" abilities resolve; the Corp then draws 1 card (mandatory, no cycle; the Corp loses if it cannot); then you spend cycles, and before each action the other side gets a window; at the end, discard down to your maximum hand size, one last window for both sides, and the turn ends.
+
+**Windows.** In a window the Corp may activate assets and upgrades (and, on its own turn before its draw, score projects); the Ghost may use abilities that cost no cycle. A side with nothing it could do skips its window. During your own action phase you may do these things at any time between actions anyway.
+
+**Corp turn.** Spend cycles:
 
 - 1 cycle: gain 1 credit
 - 1 cycle: draw 1 card
@@ -40,10 +44,10 @@ The Corp gets **3 cycles** a turn and the Ghost gets **4**. Every cycle must be 
 - 1 cycle and 2 credits, only while the Ghost has heat: trash one of the Ghost's contacts
 - all 3 cycles (so only with all 3 left): **purge** every virus counter from the Ghost's programs
 
-Without spending a cycle, on its own turn the Corp may:
+Without spending a cycle, the Corp may:
 
-- **score** an installed project that has at least as many development counters as it requires
-- **activate** an installed asset or upgrade by paying its cost (traps cannot be activated)
+- **score** an installed project that has at least as many development counters as it requires (on its own turn only)
+- **activate** an installed asset or upgrade by paying its cost (traps cannot be activated): on its own turn, in any window on the Ghost's turn, and in the run windows
 
 **Ghost turn.** Spend cycles:
 

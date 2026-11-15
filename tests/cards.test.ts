@@ -4,7 +4,7 @@ import { CARDS } from '../src/engine/cards';
 import { legalActions } from '../src/engine/legal';
 import { actor, breakerStrength, iceStrength, link, maxHand, nodeOf, points, ramLimit, ramUsed } from '../src/engine/state';
 import { viewFor } from '../src/engine/view';
-import { act, actRaw, blank, corpTurn, ghostTurn, hand, ice, rejects, rig, site, take, upgrade } from './helpers';
+import { act, actRaw, blank, corpTurn, ghostTurn, hand, ice, passWindows, rejects, rig, site, take, upgrade } from './helpers';
 
 const tested = new Set<string>();
 function card(id: string, name: string, fn: () => void) {
@@ -149,15 +149,16 @@ describe('assets', () => {
     const { card: c } = site(s, 'shell-company');
     s.corp.cycles = 0;
     // inactive: no income
-    let t = act(act(s, { type: 'endTurn' }), { type: 'credit' });
+    let t = passWindows(act(s, { type: 'endTurn' }));
+    t = passWindows(act(t, { type: 'credit' }));
     t.ghost.cycles = 0;
-    t = act(t, { type: 'endTurn' });
+    t = passWindows(act(t, { type: 'endTurn' }));
     expect(t.corp.credits).toBe(1);
     s = act(s, { type: 'activate', card: c });
     expect(s.corp.credits).toBe(0);
-    s = act(s, { type: 'endTurn' });
+    s = passWindows(act(s, { type: 'endTurn' }));
     s.ghost.cycles = 0;
-    s = act(s, { type: 'endTurn' });
+    s = passWindows(act(s, { type: 'endTurn' }));
     expect(s.corp.credits).toBe(1);
     expect(viewFor(s, 'ghost').corp.nodes.at(-1)!.root!.card).toBe(c);
   });

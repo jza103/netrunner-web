@@ -82,7 +82,7 @@ Debugging: `npx vite-node scripts/debug-seed.ts SEED` prints a full bot-vs-bot g
 Where the rules or a card could be read two ways, this is what the engine does.
 
 1. **Every cycle must be spent.** You cannot end the turn early; taking a credit is always available.
-2. **Activation timing.** The Corp activates ICE only while the Ghost approaches it during a run (CR 6.4.3). It activates assets and upgrades (not traps) on its own turn (no cycle) and in each run window: initiation, each approach, after each move inward, and after the last ICE (CR 6.9). A window where the Corp has nothing it could do is skipped; the app plays a bot's declined window with no delay, so a skipped window looks the same and gives nothing away. After each activation the window stays open while the Corp could still do more.
+2. **Activation timing.** The Corp activates ICE only while the Ghost approaches it during a run (CR 6.4.3). It activates assets and upgrades (not traps) on its own turn (no cycle), in the priority windows on the Ghost's turn (start of turn, before each Ghost action, end of turn; CR 5.7), and in each run window: initiation, each approach, after each move inward, and after the last ICE (CR 6.9). A window where a side has nothing it could do is skipped; the app plays a bot's declined window with no delay, so a skipped window looks the same and gives nothing away. After each activation the window stays open while the Corp could still do more. The window before each action opens once the previous action is complete, so a run is one action. The start-of-turn window comes before recurring credits refill, start-of-turn abilities and the Corp's draw (CR 5.6.1); the Corp may also score there.
 3. **Inactive ICE.** If the Corp does not or cannot activate approached ICE (or Blackout is in effect), the Ghost passes it.
 4. **Jack-out points.** The Ghost may jack out in every movement step: after passing any ICE (active, bypassed or left inactive) and, on a node with no ICE, before reaching it (CR 6.9.4c).
 5. **Boosts** last for one encounter. They do not carry to the next ICE.
@@ -117,6 +117,7 @@ Where the rules or a card could be read two ways, this is what the engine does.
 34. **Bypass** uses up on the first ICE the Ghost would encounter, including ICE the Corp activates on approach. It ends that encounter at once: the Ghost may then jack out or continue as after passing ICE.
 35. **Hosting.** Installing onto Exo Frame is a choice offered alongside a normal install. A hosted program uses no RAM and stays hosted until it leaves play; if the host is trashed, the hosted program is trashed too.
 36. **Press Leak** and Records Request read "your last turn" as the Ghost's most recent completed turn, the same as Lockdown Audit.
+37. **Ghost abilities that cost no cycle** can be used in any window: on either turn, during runs (encounter and movement steps), and in the windows outside runs, unless the card says "on your turn" (Burner Phone).
 
 ## Status
 

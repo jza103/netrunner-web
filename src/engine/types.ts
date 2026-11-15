@@ -72,6 +72,8 @@ export interface Ability {
   credits?: number;
   trashSelf?: boolean;
   if?: PlayCondition;
+  /** only on the Ghost's own turn (including runs) */
+  ownTurn?: boolean;
   effects: Effect[];
 }
 
@@ -276,6 +278,19 @@ export interface TraceState {
 
 export type Phase = 'mulligan' | 'action' | 'discard' | 'run' | 'gameOver';
 
+/**
+ * A paid ability window outside a run (CR 5.6, 5.7): the side named may activate cards (the Corp)
+ * or use abilities that cost no cycle (the Ghost), then passes; `rest` get it next.
+ * turnStart: after gaining cycles, before recurring credits refill and the turn begins.
+ * beforeAction: before each action of the side whose turn it is (for the other side).
+ * turnEnd: after discarding, before the turn ends.
+ */
+export interface PriorityWindow {
+  at: 'turnStart' | 'beforeAction' | 'turnEnd';
+  who: Side;
+  rest: Side[];
+}
+
 export interface GameEvent {
   seq: number;
   type: string;
@@ -301,6 +316,9 @@ export interface GameState {
   ghost: GhostState;
   run: RunState | null;
   trace: TraceState | null;
+  window: PriorityWindow | null;
+  /** the side whose turn it is is in the middle of an action (a run, a trace…); the other side's window opens when it completes */
+  inAction: boolean;
   /** this turn */
   flags: { successfulRun: boolean; prevented: Record<DamageKind, number> };
   ghostSuccessLastTurn: boolean;
@@ -321,6 +339,8 @@ export type Action =
   | { type: 'score'; card: CardId }
   | { type: 'activate'; card: CardId }
   | { type: 'decline' }
+  /** close a priority window outside a run */
+  | { type: 'pass' }
 
   | { type: 'trashContact'; card: CardId }
   | { type: 'run'; node: NodeId }

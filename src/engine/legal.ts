@@ -1,7 +1,7 @@
 // The single source of truth for what may be done. apply() accepts exactly these actions.
 import { cardOf, ensureCards, targetedEffect } from './cards';
-import { actor, available, breakerStrength, canBreak, canDevelop, currentIce, hostsWithRoom, iceStrength, isSite, link, ramLimit, ramUsed } from './state';
-import { MAX_ICE, MAX_SITES, type Action, type CardDef, type CardId, type GameState, type NodeId, type PlayCondition } from './types';
+import { actor, available, breakerStrength, canBreak, canDevelop, currentIce, hostsWithRoom, iceStrength, isSite, link, ramLimit, ramUsed, rigOf } from './state';
+import { MAX_ICE, MAX_SITES, type Action, type CardDef, type CardId, type GameState, type NodeId, type PlayCondition, type PriorityWindow, type Side } from './types';
 
 export function conditionHolds(s: GameState, c: PlayCondition | undefined): boolean {
   if (c === 'ghostHasHeat') return s.ghost.heat > 0;
@@ -66,11 +66,7 @@ function playOptions(s: GameState, card: CardId, d: CardDef): Action[] {
 function corpTurn(s: GameState): Action[] {
   const c = s.corp;
   const out: Action[] = [];
-  for (const n of sites(s)) {
-    if (!n.root) continue;
-    const d = cardOf(n.root.card);
-    if (d.type === 'project' && n.root.dev >= (d.dev ?? 99)) out.push({ type: 'score', card: n.root.card });
-  }
+  out.push(...scorable(s));
   for (const card of activatable(s)) out.push({ type: 'activate', card });
   if (c.cycles <= 0) {
     out.push({ type: 'endTurn' });
@@ -106,17 +102,45 @@ export function runTargets(s: GameState): NodeId[] {
 function abilityReady(s: GameState, card: CardId): boolean {
   const a = cardOf(card).ability;
   if (!a) return false;
+  if (a.ownTurn && s.turn !== 'ghost') return false;
   if (a.cycles > s.ghost.cycles || (a.credits ?? 0) > available(s, 'ghost', 'other') || !conditionHolds(s, a.if)) return false;
   // an ability that only draws needs cards to draw
   if (a.effects.every((e) => e.op === 'draw') && !s.ghost.deck.length) return false;
   return true;
 }
 
+/** Abilities on the Ghost's installed cards that cost no cycle and could be used now: in any paid ability window (CR 9.2). */
+export function freeAbilities(s: GameState): Action[] {
+  return rigOf(s)
+    .filter((card) => cardOf(card).ability?.cycles === 0 && abilityReady(s, card))
+    .map((card): Action => ({ type: 'use', card }));
+}
+
+/** Scorable projects: the Corp may score in paid ability windows on its own turn (CR 1.17.3). */
+function scorable(s: GameState): Action[] {
+  const out: Action[] = [];
+  for (const n of sites(s)) {
+    if (!n.root) continue;
+    const d = cardOf(n.root.card);
+    if (d.type === 'project' && n.root.dev >= (d.dev ?? 99)) out.push({ type: 'score', card: n.root.card });
+  }
+  return out;
+}
+
+/** What a side could do in a priority window outside a run (empty: it is skipped for that side). */
+export function windowOptions(s: GameState, side: Side, at: PriorityWindow['at']): Action[] {
+  if (side === 'ghost') return freeAbilities(s);
+  const out: Action[] = [];
+  if (s.turn === 'corp' && at === 'turnStart') out.push(...scorable(s));
+  out.push(...activatable(s).map((card): Action => ({ type: 'activate', card })));
+  return out;
+}
+
 function ghostTurn(s: GameState): Action[] {
   const g = s.ghost;
   const out: Action[] = [];
   const rig = [...g.programs, ...g.gear, ...g.contacts];
-  for (const card of rig) if (cardOf(card).ability?.cycles === 0 && abilityReady(s, card)) out.push({ type: 'use', card });
+  out.push(...freeAbilities(s));
   for (const card of g.programs) out.push({ type: 'scrap', card });
   if (g.cycles <= 0) {
     out.push({ type: 'endTurn' });
@@ -186,11 +210,12 @@ function runActions(s: GameState): Action[] {
         }
       }
       if (iceStrength(s, ice.card) > 0) for (const card of g.programs) if (cardOf(card).virusSpend && (g.virus[card] ?? 0) > 0) out.push({ type: 'spendVirus', card });
+      out.push(...freeAbilities(s));
       out.push({ type: 'proceed' });
       return out;
     }
     case 'passed':
-      return [{ type: 'continue' }, { type: 'jackOut' }];
+      return [...freeAbilities(s), { type: 'continue' }, { type: 'jackOut' }];
     case 'corpTrash':
       return g.programs.map((card) => ({ type: 'chooseTrash', card }));
     case 'access': {
@@ -228,6 +253,7 @@ export function legalActions(s: GameState): Action[] {
   const who = actor(s);
   if (!who) return [];
   if (s.trace) return traceActions(s, who);
+  if (s.window) return [...windowOptions(s, who, s.window.at), { type: 'pass' }];
   if (s.phase === 'mulligan') return [{ type: 'keep' }, { type: 'mulligan' }];
   if (s.phase === 'discard') return s[who].hand.map((card) => ({ type: 'discard', card }));
   if (s.phase === 'run') return runActions(s);

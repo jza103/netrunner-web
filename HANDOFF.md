@@ -41,8 +41,8 @@ The audit compared the CR with `src/engine` (`legal.ts`, `actions.ts`, `state.ts
 
 - [x] **2.1 Jack out at every movement step** (CR 6.6.3, 6.9.4c). The Runner may jack out after passing *any* ICE position, including ICE the Corp did not or could not rez, and also on a run with no ICE at all, before the Corp's last rez window and the approach to the server. Now: `advanceRun` slips past inactive or unaffordable ICE with no stop, and a run with no ICE goes straight to `approachNode` (README rulings 3 and 4). Fix: after every position, go to a `passed` step offering continue or jack out; drop rulings 3 and 4.
 - [x] **2.2 Corp rez windows during a run** (CR 6.9.1e, 6.9.2b, 6.9.4e). The Corp may rez assets and upgrades in the initiation window, in every approach window whether or not it can pay for that ICE, and after the Runner moves inward. Now: no initiation window, and no approach window at all when the ICE is unaffordable (`advanceRun`). Fix: open the window every time (the Corp's ICE option appears only if it can pay). This also keeps the windows from leaking whether the Corp can pay.
-- [ ] **2.3 Corp rezzes outside its own turn** (CR 5.6.3b, 5.7.1b, 5.7.1e, 5.7.2b). The Corp may rez non-ICE cards at the start of the Runner's turn, before each Runner action and in both discard phases. Now: only in its own action phase and the two run windows (ruling 2). Fix: add Corp windows to the Runner's turn. To keep play quick, the app can skip the prompt when the Corp has nothing it could rez, as long as that tells the Ghost nothing it could not already see.
-- [ ] **2.4 Runner paid abilities in every paid ability window** (CR 9.2, 6.9.x windows, 5.6.x and 5.7.x). Abilities that cost no cycle can be used on either turn and during runs. Now: no-cycle abilities only on the Ghost's own turn, outside runs (`ghostTurn`). Today only one card has one, but packs will have more.
+- [x] **2.3 Corp rezzes outside its own turn** (CR 5.6.3b, 5.7.1b, 5.7.1e, 5.7.2b). The Corp may rez non-ICE cards at the start of the Runner's turn, before each Runner action and in both discard phases. Now: only in its own action phase and the two run windows (ruling 2). Fix: add Corp windows to the Runner's turn. To keep play quick, the app can skip the prompt when the Corp has nothing it could rez, as long as that tells the Ghost nothing it could not already see.
+- [x] **2.4 Runner paid abilities in every paid ability window** (CR 9.2, 6.9.x windows, 5.6.x and 5.7.x). Abilities that cost no cycle can be used on either turn and during runs. Now: no-cycle abilities only on the Ghost's own turn, outside runs (`ghostTurn`). Today only one card has one, but packs will have more.
 
 **Access**
 
@@ -62,7 +62,7 @@ The audit compared the CR with `src/engine` (`legal.ts`, `actions.ts`, `state.ts
 
 **Turn structure**
 
-- [ ] **2.12 Corp turn order** (CR 5.6.1). Gain clicks, a paid ability window, refill recurring credits, the turn formally begins (start-of-turn abilities), then the mandatory draw; the Runner wins if that draw cannot happen. Now: `startTurn` checks for an empty Mainframe and draws *before* refills and start-of-turn effects. Fix the order and test that a start-of-turn effect resolves before the draw.
+- [x] **2.12 Corp turn order** (CR 5.6.1). Gain clicks, a paid ability window, refill recurring credits, the turn formally begins (start-of-turn abilities), then the mandatory draw; the Runner wins if that draw cannot happen. Now: `startTurn` checks for an empty Mainframe and draws *before* refills and start-of-turn effects. Fix the order and test that a start-of-turn effect resolves before the draw.
 
 **Damage and wording**
 

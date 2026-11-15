@@ -1,7 +1,7 @@
 // apply(state, action): the only way the game changes. Pure: it never touches its input.
 // Card behaviour is data (see Effect in types.ts); runEffect() below is the one interpreter for it.
 import { cardOf, ensureCards, nameOf } from './cards';
-import { conditionHolds, corpRunOptions, isLegal } from './legal';
+import { conditionHolds, corpRunOptions, isLegal, windowOptions } from './legal';
 import { randInt, shuffle } from './rng';
 import { actor, cloneState, corpSources, currentIce, findInstalled, ghostSources, iceStrength, link, maxHand, nodeName, nodeOf, points, recurringFor, rigOf, rigSum } from './state';
 import {
@@ -13,6 +13,7 @@ import {
   type Effect,
   type GameState,
   type Installed,
+  type PriorityWindow,
   type Purpose,
   type NodeId,
   type Result,
@@ -308,6 +309,11 @@ function finishTrace(s: GameState, ghostBoost: number) {
 // Turns
 // ---------------------------------------------------------------------------
 
+// A turn follows CR 5.6 and 5.7: gain cycles, a priority window (the side whose turn it is first),
+// recurring credits refill, the turn formally begins (start-of-turn abilities), then the Corp's
+// mandatory draw; before each action the other side gets a window; after discarding, one last
+// window for both, then the turn ends.
+
 function startTurn(s: GameState, side: Side) {
   s.turn = side;
   s.turnNumber++;
@@ -315,21 +321,50 @@ function startTurn(s: GameState, side: Side) {
   s.flags = { successfulRun: false, prevented: { net: 0, meat: 0, core: 0 } };
   s[side].cycles = CYCLES[side];
   emit(s, 'turn', side, `Turn ${s.turnNumber}: ${label(side)} begins with ${CYCLES[side]} cycles.`);
+  openWindow(s, 'turnStart', [side, other(side)]);
+}
+
+/** Recurring credits refill, start-of-turn abilities resolve, and the Corp draws. */
+function beginTurn(s: GameState) {
+  const side = s.turn;
+  for (const c of side === 'corp' ? corpSources(s) : ghostSources(s)) {
+    const r = cardOf(c).recurring;
+    if (r) s[side].recurring[c] = r.n;
+  }
+  for (const c of side === 'corp' ? corpSources(s) : ghostSources(s)) runEffects(s, cardOf(c).onTurnStart, { owner: side, source: nameOf(c) });
   if (side === 'corp') {
     if (!s.corp.deck.length) return win(s, 'ghost', 'the Corp must draw from an empty Mainframe.');
     drawCards(s, 'corp', 1);
-    for (const c of corpSources(s)) {
-      const r = cardOf(c).recurring;
-      if (r) s.corp.recurring[c] = r.n;
-      runEffects(s, cardOf(c).onTurnStart, { owner: 'corp', source: nameOf(c) });
-    }
-  } else {
-    for (const c of ghostSources(s)) {
-      const r = cardOf(c).recurring;
-      if (r) s.ghost.recurring[c] = r.n;
-      runEffects(s, cardOf(c).onTurnStart, { owner: 'ghost', source: nameOf(c) });
-    }
   }
+  beforeAction(s);
+}
+
+/** Open a priority window for the first of these sides that has something it could do; skip it otherwise. */
+function openWindow(s: GameState, at: PriorityWindow['at'], order: Side[]) {
+  const [who, ...rest] = order.filter((side) => windowOptions(s, side, at).length > 0);
+  if (!who) return closeWindow(s, at);
+  s.window = { at, who, rest };
+}
+
+/** The side in the window passes: the next one gets it, or the game moves on. */
+function passWindow(s: GameState) {
+  const w = s.window!;
+  s.window = null;
+  const next = w.rest.filter((side) => windowOptions(s, side, w.at).length > 0);
+  if (next.length) s.window = { at: w.at, who: next[0], rest: next.slice(1) };
+  else closeWindow(s, w.at);
+}
+
+function closeWindow(s: GameState, at: PriorityWindow['at']) {
+  s.window = null;
+  if (s.phase === 'gameOver') return;
+  if (at === 'turnStart') return beginTurn(s);
+  if (at === 'turnEnd') return passTurn(s);
+}
+
+/** Before an action of the side whose turn it is, the other side gets a window. */
+function beforeAction(s: GameState) {
+  if (s.phase === 'action' && !s.run && !s.trace && s[s.turn].cycles > 0) openWindow(s, 'beforeAction', [other(s.turn)]);
 }
 
 function passTurn(s: GameState) {
@@ -343,7 +378,7 @@ function endTurn(s: GameState) {
   if (s[side].hand.length > maxHand(s, side)) {
     s.phase = 'discard';
     emit(s, 'discardDown', side, `${label(side)} must discard down to ${maxHand(s, side)} cards.`);
-  } else passTurn(s);
+  } else openWindow(s, 'turnEnd', [side, other(side)]);
 }
 
 // ---------------------------------------------------------------------------
@@ -808,7 +843,7 @@ function step(s: GameState, a: Action) {
       p.hand = p.hand.filter((c) => c !== a.card);
       p.discard.push(a.card);
       emit(s, 'discard', side, `${label(side)} discards a card.`, { side, text: `You discard ${nameOf(a.card)}.` });
-      if (p.hand.length <= maxHand(s, side)) passTurn(s);
+      if (p.hand.length <= maxHand(s, side)) openWindow(s, 'turnEnd', [side, other(side)]);
       return;
     case 'traceBoost': {
       const t = s.trace!;
@@ -834,17 +869,30 @@ function step(s: GameState, a: Action) {
       emit(s, 'purge', 'corp', `The Corp spends its whole turn purging viruses${total ? `: ${total} virus counter${total === 1 ? '' : 's'} removed` : ''}.`);
       return;
     }
+    case 'pass':
+      return passWindow(s);
     case 'endTurn':
       return endTurn(s);
   }
 }
+
+/** Actions that spend a cycle: once one completes (its run or trace included), the other side gets a window. */
+const TURN_ACTIONS = new Set<Action['type']>(['credit', 'draw', 'install', 'play', 'develop', 'trashContact', 'run', 'shedHeat', 'purge']);
 
 export function apply(state: GameState, action: Action): Result {
   ensureCards(state);
   if (state.phase === 'gameOver') return { ok: false, error: 'The game is over.' };
   if (!isLegal(state, action)) return { ok: false, error: explain(state, action) };
   const s = cloneState(state);
+  const inWindow = !!state.window;
+  if (!inWindow && state.phase === 'action' && actor(state) === state.turn && (TURN_ACTIONS.has(action.type) || (action.type === 'use' && (cardOf(action.card).ability?.cycles ?? 0) > 0))) s.inAction = true;
   step(s, action);
+  // a card used inside a window: the window stays open while that side could do more
+  if (inWindow && s.window && action.type !== 'pass' && s.window.who === actor(state) && !windowOptions(s, s.window.who, s.window.at).length) passWindow(s);
+  if (s.inAction && s.phase === 'action' && !s.run && !s.trace && !s.window) {
+    s.inAction = false;
+    beforeAction(s);
+  }
   return { ok: true, state: s };
 }
 
