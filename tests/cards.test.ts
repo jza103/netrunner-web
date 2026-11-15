@@ -349,12 +349,17 @@ describe('other programs, gear and contacts', () => {
     const deck = s.corp.deck;
     const top3 = [deck.at(-1)!, deck.at(-2)!, deck.at(-3)!];
     s = act(s, { type: 'run', node: 'mainframe' });
-    expect([s.run!.accessing, ...s.run!.accessQueue]).toEqual(top3);
+    expect(s.run!.accessing).toBe(top3[0]);
+    expect(s.run!.zoneLeft).toBe(2);
+    s = act(s, { type: 'leave' });
+    expect(s.run!.accessing).toBe(top3[1]);
+    s = act(s, { type: 'leave' });
+    expect(s.run!.accessing).toBe(top3[2]);
     let t = ghostTurn(blank());
     rig(t, 'deep-probe');
     hand(t, 'corp', 'tripwire', 'bulkhead');
     t = act(t, { type: 'run', node: 'command' });
-    expect(t.run!.accessQueue).toEqual([]);
+    expect(t.run!.zoneLeft).toBe(0);
   });
   card('ram-brick', '+2 RAM', () => {
     let s = ghostTurn(blank());
@@ -474,6 +479,10 @@ describe('stunts', () => {
     ice(s, id, 'black-mamba', false);
     ice(s, 'command', 'tripwire', true);
     s = act(s, { type: 'play', card: c, node: id });
+    // each inactive ICE is passed with no Corp prompt; the Ghost may jack out after each
+    expect(s.run!.step).toBe('passed');
+    s = act(s, { type: 'continue' });
+    s = act(s, { type: 'continue' });
     expect(s.run!.step).toBe('access');
     expect(nodeOf(s, id).ice.every((i) => !i.active)).toBe(true);
     s = act(s, { type: 'steal' });
@@ -534,13 +543,15 @@ describe('damage kinds, upgrades and activating during runs', () => {
     let s = ghostTurn(blank());
     const { id, card: desk } = site(s, 'watch-desk');
     s = act(s, { type: 'run', node: 'mainframe' });
-    expect(s.run!.step).toBe('approachNode');
+    expect(s.run!.step).toBe('initiation');
     expect(legalActions(s)).toEqual([{ type: 'activate', card: desk }, { type: 'decline' }]);
+    s = actRaw(s, { type: 'decline' });
+    s = actRaw(s, { type: 'continue' });
+    expect(s.run!.step).toBe('approachNode');
     s = actRaw(s, { type: 'activate', card: desk });
     expect(s.ghost.heat).toBe(1);
     expect(s.corp.credits).toBe(4);
-    expect(s.run!.step).toBe('approachNode'); // the Corp may activate more, then passes
-    s = actRaw(s, { type: 'decline' });
+    // nothing more the Corp could activate: its window closes and the Ghost accesses
     expect(s.run!.step).toBe('access');
     let t = corpTurn(blank());
     const { card: d2 } = site(t, 'watch-desk');
@@ -572,6 +583,8 @@ describe('damage kinds, upgrades and activating during runs', () => {
     expect(cp).toBe(up);
     const cp2 = upgrade(t, 'mainframe', 'choke-point', false);
     t = act(t, { type: 'run', node: 'mainframe' });
+    expect(t.run!.step).toBe('initiation');
+    t = act(t, { type: 'decline' });
     expect(t.run!.step).toBe('approach');
     expect(legalActions(t)).toContainEqual({ type: 'activate', card: cp2 });
     t = act(t, { type: 'activate', card: cp2 });
@@ -580,7 +593,7 @@ describe('damage kinds, upgrades and activating during runs', () => {
     expect(t.run!.step).toBe('encounter');
     expect(iceStrength(t, g3)).toBe(3);
   });
-  card('lockout-relay', 'upgrade: when a run gets past all ICE here, the Ghost pays 3 or the run ends', () => {
+  card('lockout-relay', 'upgrade: when the Ghost approaches this node, they lose 3 credits or the run ends', () => {
     let s = ghostTurn(blank(), 5);
     const relay = upgrade(s, 'mainframe', 'lockout-relay', true);
     s = act(s, { type: 'run', node: 'mainframe' }); // nothing to activate: the window passes
@@ -597,8 +610,9 @@ describe('damage kinds, upgrades and activating during runs', () => {
     let u = ghostTurn(blank(), 5);
     const r2 = upgrade(u, 'command', 'lockout-relay', false);
     u = act(u, { type: 'run', node: 'command' });
+    expect(u.run!.step).toBe('initiation');
     u = actRaw(u, { type: 'activate', card: r2 });
-    u = actRaw(u, { type: 'decline' });
+    u = act(u, { type: 'continue' });
     expect(u.ghost.credits).toBe(2);
     expect(relay).toBeTruthy();
   });
@@ -708,11 +722,11 @@ describe('identities, traces, bad publicity, viruses, bypass, recurring credits,
     const [r] = rig(s, 'rot-crawler');
     s = act(s, { type: 'run', node: 'mainframe' });
     expect(s.ghost.virus[r]).toBe(1);
-    expect(s.run!.accessQueue).toHaveLength(0); // 1 card: the one being accessed
+    expect(s.run!.zoneLeft).toBe(0); // 1 card: the one being accessed
     s = act(s, { type: 'leave' });
     s = act(s, { type: 'run', node: 'mainframe' }); // second counter lands before access
     expect(s.ghost.virus[r]).toBe(2);
-    expect(s.run!.accessQueue).toHaveLength(1);
+    expect(s.run!.zoneLeft).toBe(1);
     s = act(s, { type: 'leave' });
     s = act(s, { type: 'leave' });
     s = act(s, { type: 'run', node: 'command' });

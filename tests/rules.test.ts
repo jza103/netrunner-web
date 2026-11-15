@@ -185,10 +185,14 @@ describe('Ghost actions', () => {
 });
 
 describe('runs', () => {
-  it('no ICE: straight to access; Mainframe shows the top card', () => {
+  it('no ICE: the Ghost may still jack out before the node (CR 6.9.4); then the Mainframe shows the top card', () => {
     let s = ghostTurn(blank());
     const top = take(s, 'quarterly-windfall');
     s.corp.deck.push(top);
+    const out = actRaw(s, { type: 'run', node: 'mainframe' });
+    expect(out.run!.step).toBe('passed');
+    expect(legalActions(out)).toEqual([{ type: 'continue' }, { type: 'jackOut' }]);
+    expect(actRaw(out, { type: 'jackOut' }).flags.successfulRun).toBe(false);
     s = act(s, { type: 'run', node: 'mainframe' });
     expect(s.run!.step).toBe('access');
     expect(s.run!.accessing).toBe(top);
@@ -213,6 +217,11 @@ describe('runs', () => {
     s.corp.discard.push(take(s, 'quiet-acquisition'), take(s, 'tripwire'), take(s, 'skyhook-contract'));
     expect(viewFor(s, 'ghost').corp.discard.every((c) => c.startsWith('?'))).toBe(true);
     s = act(s, { type: 'run', node: 'dump' });
+    // the Ghost picks the order of the two projects; the tripwire is accessed with no decision to make
+    expect(legalActions(s)).toEqual([{ type: 'access', i: 0 }, { type: 'access', i: 1 }]);
+    expect(s.run!.accessed).toHaveLength(1);
+    s = act(s, { type: 'access', i: 1 });
+    expect(cardOf(s.run!.accessing!).id).toBe('skyhook-contract');
     s = act(s, { type: 'steal' });
     s = act(s, { type: 'steal' });
     expect(points(s, 'ghost')).toBe(3);
@@ -224,8 +233,13 @@ describe('runs', () => {
     const w = ice(s, 'command', 'bulkhead', false);
     s.corp.credits = 3;
     s = act(s, { type: 'run', node: 'command' });
+    expect(s.run!.step).toBe('approach');
     expect(actor(s)).toBe('corp');
-    const declined = act(s, { type: 'decline' });
+    expect(legalActions(s)).toEqual([{ type: 'activate', card: w }, { type: 'decline' }]);
+    let declined = act(s, { type: 'decline' });
+    // passing inactive ICE is still a movement step: the Ghost may jack out (CR 6.9.4c)
+    expect(declined.run!.step).toBe('passed');
+    declined = act(declined, { type: 'continue' });
     expect(declined.run).toBeNull(); // empty hand: nothing to access
     expect(declined.flags.successfulRun).toBe(true);
     s = act(s, { type: 'activate', card: w });
@@ -233,12 +247,15 @@ describe('runs', () => {
     expect(s.run!.step).toBe('encounter');
     expect(actor(s)).toBe('ghost');
   });
-  it('ICE the Corp cannot afford is passed without asking', () => {
+  it('ICE the Corp cannot afford is passed without a Corp prompt, and the Ghost may jack out after it', () => {
     let s = ghostTurn(blank());
     ice(s, 'command', 'bulkhead', false);
     s.corp.credits = 2;
     hand(s, 'corp', 'tripwire');
     s = act(s, { type: 'run', node: 'command' });
+    expect(s.run!.step).toBe('passed');
+    expect(legalActions(s)).toEqual([{ type: 'continue' }, { type: 'jackOut' }]);
+    s = act(s, { type: 'continue' });
     expect(s.run!.step).toBe('access');
   });
   it('encounter: boost to match strength, then break; boosts end with the encounter', () => {
@@ -423,6 +440,9 @@ describe('upgrades', () => {
     s.corp.deck.push(top);
     const u = upgrade(s, 'mainframe', 'lockout-relay');
     s = act(s, { type: 'run', node: 'mainframe' });
+    // the Ghost chooses the order: the upgrade, or the top of the Mainframe (CR 7.3.4)
+    expect(legalActions(s)).toEqual([{ type: 'access', i: 0 }, { type: 'access', zone: true }]);
+    s = act(s, { type: 'access', zone: true });
     expect(s.run!.accessing).toBe(top);
     s = act(s, { type: 'leave' });
     expect(s.run!.accessing).toBe(u);
@@ -442,15 +462,25 @@ describe('upgrades', () => {
 });
 
 describe('the Corp window when a run reaches its node', () => {
-  it('comes after all ICE is passed, even with nothing to activate, so it gives nothing away', () => {
+  it('comes after the Ghost passes all ICE and declines to jack out; it is skipped when the Corp has nothing to do', () => {
     let s = ghostTurn(blank());
-    s.corp.credits = 0;
+    s.corp.credits = 1;
+    const { card: shell } = site(s, 'shell-company');
     s = actRaw(s, { type: 'run', node: 'mainframe' });
+    expect(s.run!.step).toBe('initiation');
+    s = actRaw(s, { type: 'decline' });
+    expect(s.run!.step).toBe('passed');
+    s = actRaw(s, { type: 'continue' });
     expect(s.run!.step).toBe('approachNode');
     expect(actor(s)).toBe('corp');
-    expect(legalActions(s)).toEqual([{ type: 'decline' }]);
+    expect(legalActions(s)).toEqual([{ type: 'activate', card: shell }, { type: 'decline' }]);
     s = actRaw(s, { type: 'decline' });
     expect(s.run!.step).toBe('access');
+    let t = ghostTurn(blank());
+    t.corp.credits = 0;
+    t = actRaw(t, { type: 'run', node: 'mainframe' });
+    t = actRaw(t, { type: 'continue' });
+    expect(t.run!.step).toBe('access');
   });
   it('offers every inactive non-trap asset and upgrade the Corp can afford, anywhere', () => {
     let s = ghostTurn(blank());
@@ -460,6 +490,7 @@ describe('the Corp window when a run reaches its node', () => {
     upgrade(s, 'command', 'choke-point'); // costs 2: too much
     const relay = upgrade(s, 'dump', 'lockout-relay');
     s = actRaw(s, { type: 'run', node: 'mainframe' });
+    expect(s.run!.step).toBe('initiation');
     expect(legalActions(s)).toEqual([{ type: 'activate', card: relay }, { type: 'activate', card: shell }, { type: 'decline' }]);
   });
   it('spending on another card while approaching ICE it can then not afford: the Ghost slips past', () => {
@@ -470,7 +501,8 @@ describe('the Corp window when a run reaches its node', () => {
     s = actRaw(s, { type: 'run', node: 'mainframe' });
     s = actRaw(s, { type: 'activate', card: cp });
     expect(s.corp.credits).toBe(1);
-    expect(s.run!.step).toBe('approachNode');
+    // nothing more it could do: the window closes, the approach window is skipped, the Ghost passes
+    expect(s.run!.step).toBe('passed');
     expect(nodeOf(s, 'mainframe').ice[0]).toMatchObject({ card: wall, active: false });
   });
   it('Blackout stops ICE activation only; the Corp still gets its window', () => {

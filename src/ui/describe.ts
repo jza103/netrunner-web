@@ -1,6 +1,6 @@
 // Words and icons for cards and actions.
 import { cardOf, effectText, isHidden, nameOf } from '../engine/cards';
-import { findInstalled, nodeName, nodeOf } from '../engine/state';
+import { currentIce, findInstalled, nodeName, nodeOf } from '../engine/state';
 import type { Action, CardDef, CardId, GameState } from '../engine/types';
 
 export function icon(d: CardDef): string {
@@ -90,7 +90,9 @@ export function describeAction(s: GameState, a: Action): string {
     case 'activate':
       return `💡 Activate ${label(a.card)} (${cardOf(a.card).cost ?? 0}¢)`;
     case 'decline':
-      return s.run?.step === 'approachNode' ? '🙈 Activate nothing: let the Ghost in' : '🙈 Leave it inactive';
+      if (s.run?.step === 'approachNode') return '🙈 Activate nothing: let the Ghost in';
+      if (s.run?.step === 'approach' && currentIce(s) && !currentIce(s)!.active) return '🙈 Leave it inactive';
+      return '🙈 Activate nothing';
     case 'trashContact':
       return `🔥 Trash their ${label(a.card)} (2¢)`;
     case 'run':
@@ -118,6 +120,12 @@ export function describeAction(s: GameState, a: Action): string {
       return '➡️ Continue the run';
     case 'jackOut':
       return '🚪 Jack out';
+    case 'access': {
+      if (a.zone) return s.run?.node === 'command' ? '🎲 Access a random card from Command' : '🔝 Access the next card from the Mainframe';
+      const c = s.run!.candidates[a.i!];
+      const up = s.corp.nodes.some((n) => n.upgrades.some((u) => u.card === c));
+      return `🔍 Access ${isHidden(c) ? (up ? 'the facedown upgrade' : 'the facedown card') : nameOf(c)}${s.corp.discard.includes(c) ? ' in the Dump' : ''}`;
+    }
     case 'steal': {
       const cost = s.run?.accessing ? cardOf(s.run.accessing).stealCost : 0;
       return `🏆 Steal it${cost ? ` (${cost}¢)` : ''}`;

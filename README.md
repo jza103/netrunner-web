@@ -82,14 +82,14 @@ Debugging: `npx vite-node scripts/debug-seed.ts SEED` prints a full bot-vs-bot g
 Where the rules or a card could be read two ways, this is what the engine does.
 
 1. **Every cycle must be spent.** You cannot end the turn early; taking a credit is always available.
-2. **Activation timing.** The Corp activates ICE only when the Ghost approaches it during a run. It activates assets and upgrades (not traps) on its own turn (no cycle), or during a run: in the window when the Ghost approaches a piece of ICE it could activate, and in the window when the run gets past all ICE and reaches the node. The node window always happens, even when the Corp has nothing it could activate, so its existence gives nothing away.
-3. **Unaffordable ICE.** If the Corp cannot pay for inactive ICE (or Blackout is in effect) the Ghost passes it with no prompt to either side and no jack-out point.
-4. **Jack-out points.** The Ghost may jack out only right after getting past ICE it encountered, including the last one before access.
+2. **Activation timing.** The Corp activates ICE only while the Ghost approaches it during a run (CR 6.4.3). It activates assets and upgrades (not traps) on its own turn (no cycle) and in each run window: initiation, each approach, after each move inward, and after the last ICE (CR 6.9). A window where the Corp has nothing it could do is skipped; the app plays a bot's declined window with no delay, so a skipped window looks the same and gives nothing away. After each activation the window stays open while the Corp could still do more.
+3. **Inactive ICE.** If the Corp does not or cannot activate approached ICE (or Blackout is in effect), the Ghost passes it.
+4. **Jack-out points.** The Ghost may jack out in every movement step: after passing any ICE (active, bypassed or left inactive) and, on a node with no ICE, before reaching it (CR 6.9.4c).
 5. **Boosts** last for one encounter. They do not carry to the next ICE.
 6. **Subroutine order.** Unbroken subroutines fire top to bottom; an "end the run" stops the rest.
 7. **"The Corp trashes 1 installed program"**: the Corp chooses. With one program there is no choice; with none nothing happens.
 8. **Command access** is one random card from the Corp's hand. **Mainframe access** is the top card; with more accesses, the next cards down, in order. Cards not stolen or trashed stay where they are in the same order.
-9. **Dump access** turns the whole Dump faceup, and every project in it is stolen. Cards already in the Dump cannot be trashed again.
+9. **Dump access** turns the whole Dump faceup and every card there is accessed (CR 7.4.1d); every project is stolen. Cards in the Dump cannot be trashed. Cards that are not projects need no decision, so the engine accesses them at once and lets the Ghost order only the projects and the Dump's upgrades.
 10. **Trash costs.** Only cards with a trash cost (assets) can be trashed on access, from anywhere except the Dump.
 11. **Decoy Lab** fires only when accessed while installed in a site, not from Command or the Mainframe. Its damage lands before the Ghost decides whether to trash it. It cannot be activated; it turns faceup when it fires.
 12. **Blacksite Ledger.** If the Ghost cannot or will not pay 3, the card stays exactly where it was (and, if it was facedown in a site, the Ghost now knows what it is).
@@ -103,11 +103,11 @@ Where the rules or a card could be read two ways, this is what the engine does.
 20. **Mulligan** is once per side, decided Corp first.
 21. **Damage kinds.** Net, meat and core damage all discard at random, and more than the Ghost's hand flatlines them. Core damage also lowers the Ghost's maximum hand size by 1 per point for the rest of the game. A maximum hand size below 0 at the end of the Ghost's turn flatlines them; exactly 0 means discarding everything.
 22. **Upgrades** install for 1 cycle in any node, central or site, alongside whatever is there; a node may hold any number. Installing a project or asset over a site's root card does not touch its upgrades. A site holding only an upgrade can be run.
-23. **Accessing upgrades.** A successful run on a node accesses its upgrades after the normal access (Command, Mainframe, Dump or the site's root card), one at a time. They can be trashed for their trash cost.
-24. **Lockout Relay** charges when the run gets past all ICE, after the Corp's node window (so one activated in that window charges at once). It does not charge if the run never gets that far.
+23. **Access order.** The Ghost chooses the order of accesses (CR 7.3.4): any card in the node's root (the site's card and any upgrades), or the next card from Command (random) or the Mainframe (from the top). When only one choice is left the engine takes it. The Corp does not see cards accessed from the Mainframe (CR 7.1.2).
+24. **Lockout Relay** triggers when the Ghost approaches the node, after the last ICE, the Ghost's chance to jack out and the Corp's last window (so one activated in that window triggers at once). It does not trigger if the run never gets that far.
 25. **Choke Point** raises strength only while active. If the Corp activates it while the Ghost approaches ICE in that node, the boost applies to that ICE's encounter.
 26. **Watch Desk** gives heat only when activated during a run, not when activated on the Corp's turn.
-27. **Running out of money mid-approach.** If the Corp spends credits on another card while the Ghost approaches inactive ICE and can no longer afford that ICE, the Ghost slips past it.
+27. **Running out of money mid-approach.** If the Corp spends credits on another card while the Ghost approaches inactive ICE and can no longer afford that ICE, the window closes when the Corp has nothing left to do and the Ghost passes the ICE.
 28. **Identities** are chosen when a game starts (the bot's at random unless you pick it), are public, never count as cards in a deck, and work all game. Helix Dynamics pays on every score, including projects scored by other effects. Vigil Systems' heat comes after the steal, so a steal that wins the game ends it first.
 29. **Traces.** The Corp boosts first, knowing the Ghost's link; then the Ghost. Success needs the trace to end strictly higher than the link. The Corp may pay up to 15; the Ghost is offered only up to the amount that matches the trace (more would change nothing). Bad publicity credits can pay for link during a run.
 30. **Bad publicity credits** can pay any cost during that run (breakers, trash costs, steal costs, link), but not effects that make the Ghost "lose" credits (Riddlegate, Lockout Relay), since losing is not paying.

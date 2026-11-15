@@ -100,7 +100,7 @@ export function actor(s: GameState): Side | null {
   if (s.phase === 'gameOver') return null;
   if (s.trace) return s.trace.corpBoost === null ? 'corp' : 'ghost';
   if (s.phase === 'mulligan') return s.mulligan;
-  if (s.phase === 'run' && s.run) return s.run.step === 'approach' || s.run.step === 'approachNode' || s.run.step === 'corpTrash' ? 'corp' : 'ghost';
+  if (s.phase === 'run' && s.run) return ['initiation', 'approach', 'moveIn', 'approachNode', 'corpTrash'].includes(s.run.step) ? 'corp' : 'ghost';
   return s.turn;
 }
 

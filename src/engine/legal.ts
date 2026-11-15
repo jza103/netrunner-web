@@ -140,17 +140,36 @@ function ghostTurn(s: GameState): Action[] {
   return out;
 }
 
+/** What the Corp could do in its current run window (empty: the window is skipped). */
+export function corpRunOptions(s: GameState): Action[] {
+  const run = s.run!;
+  const out: Action[] = [];
+  if (run.step === 'approach') {
+    const ice = currentIce(s)!;
+    if (!ice.active && !run.noActivate && available(s, 'corp', 'activateIce') >= (cardOf(ice.card).cost ?? 0)) out.push({ type: 'activate', card: ice.card });
+  }
+  out.push(...activatable(s).map((card): Action => ({ type: 'activate', card })));
+  return out;
+}
+
+/** Index of each card the Ghost may choose to access next, and whether the next Command or Mainframe card is on offer. */
+function accessChoices(s: GameState): Action[] {
+  const run = s.run!;
+  const out: Action[] = run.candidates.map((_, i) => ({ type: 'access', i }));
+  const zone = run.zoneLeft > 0 && (run.node === 'command' ? s.corp.hand.some((x) => !run.accessed.includes(x)) : run.node === 'mainframe' && s.corp.deck.some((x) => !run.accessed.includes(x)));
+  if (zone) out.push({ type: 'access', zone: true });
+  return out;
+}
+
 function runActions(s: GameState): Action[] {
   const run = s.run!;
   const g = s.ghost;
   switch (run.step) {
-    case 'approach': {
-      // the ICE itself (the Corp can afford it, or there would be no window), then other cards
-      const ice = currentIce(s)!.card;
-      return [{ type: 'activate', card: ice }, ...activatable(s).map((card): Action => ({ type: 'activate', card })), { type: 'decline' }];
-    }
+    case 'initiation':
+    case 'approach':
+    case 'moveIn':
     case 'approachNode':
-      return [...activatable(s).map((card): Action => ({ type: 'activate', card })), { type: 'decline' }];
+      return [...corpRunOptions(s), { type: 'decline' }];
     case 'encounter': {
       const ice = currentIce(s)!;
       const def = cardOf(ice.card);
@@ -175,14 +194,15 @@ function runActions(s: GameState): Action[] {
     case 'corpTrash':
       return g.programs.map((card) => ({ type: 'chooseTrash', card }));
     case 'access': {
-      const d = cardOf(run.accessing!);
+      if (!run.accessing) return accessChoices(s);
+      const d = cardOf(run.accessing);
       if (d.type === 'project') {
         if (!d.stealCost) return [{ type: 'steal' }];
         return available(s, 'ghost', 'steal') >= d.stealCost ? [{ type: 'steal' }, { type: 'leave' }] : [{ type: 'leave' }];
       }
       const out: Action[] = [];
       // only cards with a trash cost can be trashed, and not once they are already in the Dump
-      if (d.trash !== undefined && available(s, 'ghost', 'trashAccess') >= d.trash && !s.corp.discard.includes(run.accessing!)) out.push({ type: 'trash' });
+      if (d.trash !== undefined && available(s, 'ghost', 'trashAccess') >= d.trash && !s.corp.discard.includes(run.accessing)) out.push({ type: 'trash' });
       out.push({ type: 'leave' });
       return out;
     }

@@ -66,7 +66,7 @@
     "text": "Upgrade. While active, each ICE protecting this node has +2 strength." },
   { "id": "lockout-relay", "name": "Lockout Relay", "side": "corp", "type": "upgrade", "copies": 2, "cost": 1, "trash": 3,
     "onApproachNode": [{ "op": "payOrEndRun", "n": 3 }],
-    "text": "Upgrade. While active: when a run on this node gets past all its ICE, the Ghost loses 3 credits. If they have fewer than 3, the run ends instead." },
+    "text": "Upgrade. While active: when the Ghost approaches this node during a run (after passing all its ICE), they lose 3 credits. If they have fewer than 3, the run ends instead." },
 
   { "id": "quarterly-windfall", "name": "Quarterly Windfall", "side": "corp", "type": "directive", "copies": 2, "cost": 4,
     "onPlay": [{ "op": "gain", "n": 7 }],

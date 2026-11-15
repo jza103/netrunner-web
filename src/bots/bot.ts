@@ -233,7 +233,7 @@ function corpRun(v: GameState, legal: Action[]): Action {
   }
   const node = nodeOf(v, run.node);
   const valuable = !isSite(node.id) || (!!node.root && cardOf(node.root.card).type === 'project');
-  if (run.step === 'approachNode' || run.step === 'approach') {
+  {
     // punish the run, or lock the node, with cards that work mid-run
     const iceCost = run.step === 'approach' ? (cardOf(currentIce(v)!.card).cost ?? 0) : 0;
     for (const a of legal) {
@@ -245,13 +245,13 @@ function corpRun(v: GameState, legal: Action[]): Action {
       if (here && valuable && spare && d.iceStrength && run.step === 'approach') return a;
       if (here && valuable && spare && d.onApproachNode?.length && run.step === 'approachNode') return a;
     }
-    if (run.step === 'approachNode') return pick(legal, 'decline')!;
+    if (run.step !== 'approach') return pick(legal, 'decline')!;
   }
   // approach: switch the ICE on unless letting the Ghost in is better
   const trapInside = node.root && cardOf(node.root.card).trap;
   const nothingInside = isSite(node.id) && !node.root;
   if (trapInside || nothingInside) return pick(legal, 'decline')!;
-  return pick(legal, 'activate')!;
+  return pick(legal, 'activate', (a) => a.card === currentIce(v)?.card) ?? pick(legal, 'decline')!;
 }
 
 // ---------------------------------------------------------------------------
@@ -724,7 +724,8 @@ function ghostRun(v: GameState, legal: Action[]): Action {
     if (p.through < 0.2 || risk > style.lethalOk) return pick(legal, 'jackOut')!;
     return pick(legal, 'continue')!;
   }
-  // access
+  // access: the order rarely matters; take root cards and upgrades before the Command or Mainframe card
+  if (!run.accessing) return pick(legal, 'access')!;
   const steal = pick(legal, 'steal');
   if (steal) return steal;
   const trash = pick(legal, 'trash');

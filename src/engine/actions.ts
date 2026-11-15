@@ -1,9 +1,9 @@
 // apply(state, action): the only way the game changes. Pure: it never touches its input.
 // Card behaviour is data (see Effect in types.ts); runEffect() below is the one interpreter for it.
 import { cardOf, ensureCards, nameOf } from './cards';
-import { conditionHolds, isLegal } from './legal';
+import { conditionHolds, corpRunOptions, isLegal } from './legal';
 import { randInt, shuffle } from './rng';
-import { actor, available, cloneState, corpSources, currentIce, findInstalled, ghostSources, iceStrength, link, maxHand, nodeName, nodeOf, points, recurringFor, rigOf, rigSum } from './state';
+import { actor, cloneState, corpSources, currentIce, findInstalled, ghostSources, iceStrength, link, maxHand, nodeName, nodeOf, points, recurringFor, rigOf, rigSum } from './state';
 import {
   CYCLES,
   POINTS_TO_WIN,
@@ -349,6 +349,11 @@ function endTurn(s: GameState) {
 // ---------------------------------------------------------------------------
 // Runs
 // ---------------------------------------------------------------------------
+// The run follows the Comprehensive Rules' phases: initiation, then for each ICE from the outside
+// in: approach (the Corp may activate it), encounter (if it is active), movement (the Ghost may jack
+// out, then moves inward); then the Corp's last window, the approach to the node, success and access.
+// A Corp window with nothing the Corp could do is skipped; the UI plays a declined window with no
+// delay, so a skipped one looks the same.
 
 interface RunOpts {
   noActivate?: boolean;
@@ -363,11 +368,13 @@ function startRun(s: GameState, node: NodeId, opts: RunOpts = {}) {
   s.run = {
     node,
     pos: nodeOf(s, node).ice.length - 1,
-    step: 'approach',
+    step: 'initiation',
     boost: {},
     broken: [],
     subQueue: [],
-    accessQueue: [],
+    candidates: [],
+    zoneLeft: 0,
+    accessed: [],
     accessing: null,
     noActivate: !!opts.noActivate,
     extraAccess: opts.extraAccess ?? 0,
@@ -379,32 +386,56 @@ function startRun(s: GameState, node: NodeId, opts: RunOpts = {}) {
   };
   emit(s, 'run', 'ghost', `The Ghost runs on ${nodeName(node)}.`);
   if (s.run.bpCredits) emit(s, 'badPublicity', 'ghost', `Bad publicity: the Ghost has ${s.run.bpCredits} extra credit${s.run.bpCredits === 1 ? '' : 's'} for this run.`);
-  advanceRun(s);
+  corpRunWindow(s, 'initiation');
 }
 
-/** Move inward until someone has a decision to make. */
-function advanceRun(s: GameState) {
+/** Open one of the Corp's run windows, or skip it when the Corp has nothing it could do there. */
+function corpRunWindow(s: GameState, step: 'initiation' | 'approach' | 'moveIn' | 'approachNode') {
+  s.run!.step = step;
+  if (!corpRunOptions(s).length) closeCorpWindow(s);
+}
+
+/** The Corp is done with its window: the run moves on. */
+function closeCorpWindow(s: GameState) {
   const run = s.run!;
-  for (;;) {
-    if (run.pos < 0) {
-      // past all the ICE: the Corp's last chance to activate assets and upgrades
-      run.step = 'approachNode';
-      emit(s, 'approachNode', 'ghost', `The Ghost reaches ${nodeName(run.node)}.`);
-      return;
+  switch (run.step) {
+    case 'initiation':
+      return run.pos >= 0 ? approachIce(s) : movement(s);
+    case 'moveIn':
+      return approachIce(s);
+    case 'approach': {
+      const ice = currentIce(s)!;
+      if (ice.active) return beginEncounter(s);
+      emit(s, 'pass', 'ghost', 'The Ghost passes inactive ICE.');
+      return movement(s);
     }
-    const ice = nodeOf(s, run.node).ice[run.pos];
-    if (ice.active) return beginEncounter(s);
-    if (!run.noActivate && available(s, 'corp', 'activateIce') >= (cardOf(ice.card).cost ?? 0)) {
-      run.step = 'approach';
-      return;
-    }
-    emit(s, 'pass', 'ghost', 'The Ghost slips past inactive ICE.');
-    run.pos--;
+    case 'approachNode':
+      return approachNode(s);
   }
 }
 
-/** The Corp is done activating: active upgrades in the node trigger, then the run succeeds. */
-function enterNode(s: GameState) {
+function approachIce(s: GameState) {
+  corpRunWindow(s, 'approach');
+}
+
+/** Movement: the Ghost has passed the ICE at its position (or there was none) and may jack out. */
+function movement(s: GameState) {
+  const run = s.run!;
+  run.step = 'passed';
+  run.iceMinus = 0;
+}
+
+/** The Ghost goes on: to the next ICE inward, or to the Corp's last window before the node. */
+function moveInward(s: GameState) {
+  const run = s.run!;
+  run.pos--;
+  if (run.pos >= 0) return corpRunWindow(s, 'moveIn');
+  emit(s, 'approachNode', 'ghost', `The Ghost reaches ${nodeName(run.node)}.`);
+  corpRunWindow(s, 'approachNode');
+}
+
+/** The Ghost approaches the node: active upgrades there trigger, then the run succeeds. */
+function approachNode(s: GameState) {
   const run = s.run!;
   for (const u of [...nodeOf(s, run.node).upgrades]) {
     if (!u.active) continue;
@@ -423,9 +454,8 @@ function beginEncounter(s: GameState) {
   const d = cardOf(ice.card);
   if (run.bypass > 0) {
     run.bypass--;
-    run.step = 'passed';
     emit(s, 'bypass', 'ghost', `The Ghost bypasses ${d.name}.`);
-    return;
+    return movement(s);
   }
   const str = iceStrength(s, ice.card);
   emit(s, 'encounter', 'ghost', `The Ghost encounters ${d.name} (${d.subtype}, strength ${str}${str !== d.strength ? `, boosted from ${d.strength}` : ''}).`);
@@ -451,11 +481,11 @@ function resolveSubs(s: GameState) {
       return;
     }
   }
-  run.step = 'passed';
-  run.iceMinus = 0;
   emit(s, 'passed', 'ghost', `The Ghost gets past ${d.name}.`);
+  movement(s);
 }
 
+/** The run succeeds: success triggers, then the Ghost breaches the node and accesses cards one at a time. */
 function beginAccess(s: GameState) {
   const run = s.run!;
   const c = s.corp;
@@ -478,33 +508,58 @@ function beginAccess(s: GameState) {
     return endRun(s, true);
   }
   const node = nodeOf(s, run.node);
-  if (run.node === 'command') {
-    const pool = [...c.hand];
-    for (let i = 0; i < 1 + run.extraAccess && pool.length; i++) run.accessQueue.push(...pool.splice(randInt(s, pool.length), 1));
-  } else if (run.node === 'mainframe') {
+  run.candidates = [...(node.root ? [node.root.card] : []), ...node.upgrades.map((u) => u.card)];
+  if (run.node === 'command') run.zoneLeft = 1 + run.extraAccess;
+  else if (run.node === 'mainframe') {
     const viral = s.ghost.programs.reduce((k, p) => k + (cardOf(p).virusAccess ? Math.floor((s.ghost.virus[p] ?? 0) / cardOf(p).virusAccess!) : 0), 0);
-    const n = 1 + run.extraAccess + rigSum(s, (d) => d.mainframeAccess) + viral;
-    run.accessQueue = c.deck.slice(-n).reverse();
+    run.zoneLeft = 1 + run.extraAccess + rigSum(s, (d) => d.mainframeAccess) + viral;
   } else if (run.node === 'dump') {
+    // every card in the Dump turns faceup and is accessed. Cards there that are not projects
+    // cannot be trashed or stolen and nothing reacts to them, so they are accessed at once.
     c.discardSeen = [...c.discard];
-    run.accessQueue = c.discard.filter((x) => cardOf(x).type === 'project');
-    if (!run.accessQueue.length) emit(s, 'access', 'ghost', `The Ghost sifts the Dump (${plural(c.discard.length, 'card')}) and finds no projects.`);
-  } else if (node.root) run.accessQueue = [node.root.card];
-  // upgrades in the node are accessed too
-  run.accessQueue.push(...node.upgrades.map((u) => u.card));
-  if (!run.accessQueue.length && run.node !== 'dump') emit(s, 'access', 'ghost', 'There is nothing to access there.');
+    const rest = c.discard.filter((x) => cardOf(x).type !== 'project');
+    run.accessed.push(...rest);
+    run.candidates.push(...c.discard.filter((x) => cardOf(x).type === 'project'));
+    emit(s, 'access', 'ghost', `The Ghost breaches the Dump: ${plural(c.discard.length, 'card')} turn faceup.`);
+  }
+  if (!run.candidates.length && !zoneCard(s)) emit(s, 'access', 'ghost', 'There is nothing to access there.');
   run.step = 'access';
   nextAccess(s);
 }
 
+/** The next card the Ghost would access from Command (at random) or the Mainframe (from the top), if any are left. */
+function zoneCard(s: GameState, pickRandom = false): CardId | null {
+  const run = s.run!;
+  if (run.zoneLeft <= 0) return null;
+  if (run.node === 'command') {
+    const pool = s.corp.hand.filter((x) => !run.accessed.includes(x));
+    if (!pool.length) return null;
+    return pickRandom ? pool[randInt(s, pool.length)] : pool[0];
+  }
+  if (run.node === 'mainframe') {
+    for (let i = s.corp.deck.length - 1; i >= 0; i--) if (!run.accessed.includes(s.corp.deck[i])) return s.corp.deck[i];
+  }
+  return null;
+}
+
+/** Between accesses: the run ends when nothing is left; a single choice is taken at once. */
 function nextAccess(s: GameState) {
   const run = s.run!;
-  const card = run.accessQueue.shift();
-  if (!card) return endRun(s, true);
+  run.accessing = null;
+  const options = run.candidates.length + (zoneCard(s) ? 1 : 0);
+  if (!options) return endRun(s, true);
+  if (options === 1) return run.candidates.length ? accessCard(s, run.candidates[0]) : accessCard(s, zoneCard(s, true)!, true);
+}
+
+function accessCard(s: GameState, card: CardId, fromZone = false) {
+  const run = s.run!;
+  run.candidates = run.candidates.filter((x) => x !== card);
+  if (fromZone) run.zoneLeft--;
+  run.accessed.push(card);
   run.accessing = card;
   const d = cardOf(card);
   const inst = findInstalled(s, card);
-  emit(s, 'access', 'ghost', inst?.inst.active ? `The Ghost accesses ${d.name}.` : 'The Ghost accesses a card.', { side: 'ghost', text: `You access ${d.name}.` });
+  emit(s, 'access', 'ghost', inst?.inst.active || s.corp.discard.includes(card) ? `The Ghost accesses ${d.name}.` : 'The Ghost accesses a card.', { side: 'ghost', text: `You access ${d.name}.` });
   if (inst && d.onAccess?.length) {
     if (d.trap) {
       emit(s, 'trap', 'corp', `It is a trap: ${d.name}!`);
@@ -602,17 +657,9 @@ function activate(s: GameState, card: CardId) {
   emit(s, 'activate', 'corp', `The Corp activates ${d.name} (${t.isIce ? 'protecting' : 'in'} ${nodeName(t.node.id)}) for ${d.cost ?? 0}.`);
   const run = s.run;
   if (!run) return;
-  if (run.step === 'approach' && t.isIce && currentIce(s)?.card === card) return beginEncounter(s);
-  if (runEffects(s, d.onActivateInRun, { owner: 'corp', source: d.name, node: run.node }) !== 'ok') return;
-  // still approaching ICE it can no longer pay for: the Ghost slips past
-  if (s.run?.step === 'approach') {
-    const ice = currentIce(s)!;
-    if (available(s, 'corp', 'activateIce') < (cardOf(ice.card).cost ?? 0)) {
-      emit(s, 'pass', 'ghost', 'The Ghost slips past inactive ICE.');
-      s.run.pos--;
-      advanceRun(s);
-    }
-  }
+  if (!t.isIce && runEffects(s, d.onActivateInRun, { owner: 'corp', source: d.name, node: run.node }) !== 'ok') return;
+  // the window stays open while the Corp has more it could do
+  if (s.run && ['initiation', 'approach', 'moveIn', 'approachNode'].includes(s.run.step) && !corpRunOptions(s).length) closeCorpWindow(s);
 }
 
 function score(s: GameState, card: CardId) {
@@ -675,10 +722,7 @@ function step(s: GameState, a: Action) {
     case 'activate':
       return activate(s, a.card);
     case 'decline':
-      if (s.run!.step === 'approachNode') return enterNode(s);
-      emit(s, 'pass', 'ghost', 'The Corp leaves its ICE inactive; the Ghost slips past.');
-      s.run!.pos--;
-      return advanceRun(s);
+      return closeCorpWindow(s);
     case 'trashContact':
       s.corp.cycles--;
       pay(s, 'corp', 2, 'other');
@@ -724,10 +768,13 @@ function step(s: GameState, a: Action) {
       trashProgram(s, a.card);
       return resolveSubs(s);
     case 'continue':
-      s.run!.pos--;
-      return advanceRun(s);
+      return moveInward(s);
     case 'jackOut':
       return endRun(s, false, 'the Ghost jacks out.');
+    case 'access': {
+      const run = s.run!;
+      return a.zone ? accessCard(s, zoneCard(s, true)!, true) : accessCard(s, run.candidates[a.i!]);
+    }
     case 'steal': {
       const card = s.run!.accessing!;
       const d = cardOf(card);

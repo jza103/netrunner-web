@@ -22,13 +22,22 @@ export function viewFor(state: GameState, side: Side): GameState {
       n.ice.forEach((i, k) => mask(i, `${n.id}ice${k}`));
       n.upgrades.forEach((i, k) => mask(i, `${n.id}up${k}`));
     }
-    // the card being accessed is shown to the Ghost; the rest of the queue is not
-    if (v.run) v.run.accessQueue = hide(v.run.accessQueue, 'queue');
+    // facedown cards the Ghost may choose to access stay hidden until accessed
+    if (v.run) {
+      const run = v.run;
+      run.candidates = run.candidates.map((c, i) => {
+        const inst = state.corp.nodes.flatMap((n) => [...(n.root ? [n.root] : []), ...n.upgrades]).find((x) => x.card === c);
+        return inst && !inst.active && !v.ghost.known.includes(c) ? `?cand${i}` : c;
+      });
+    }
   } else {
     v.ghost.hand = hide(v.ghost.hand, 'ghand');
     v.ghost.known = [];
+    // the Corp does not see cards the Ghost accesses from the Mainframe (CR 7.1.2)
     if (v.run) {
-      v.run.accessQueue = hide(v.run.accessQueue, 'queue');
+      const deck = new Set(state.corp.deck);
+      v.run.accessed = v.run.accessed.map((c, i) => (deck.has(c) ? `?acc${i}` : c));
+      if (v.run.accessing && deck.has(v.run.accessing)) v.run.accessing = '?accessing';
     }
   }
   v.events = v.events.map((e) => (e.priv && e.priv.side !== side ? { seq: e.seq, type: e.type, text: e.text, ...(e.side ? { side: e.side } : {}) } : e));

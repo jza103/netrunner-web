@@ -59,19 +59,26 @@ Without spending a cycle, on their own turn the Ghost may scrap (trash) one of t
 
 ## Runs
 
-The Ghost names a node and meets its ICE from the outermost inward.
+The Ghost names a node and works through its ICE from the outermost inward. These steps follow the Netrunner run phases.
 
-1. **Approach.** If the ICE is inactive, the Corp may pay its cost to activate it. If the Corp does not (or cannot), the Ghost slips past it. In this window the Corp may also activate any of its assets and upgrades.
-2. **Encounter.** Active ICE has a type (wall, cipher or hunter), a strength and one or more subroutines. The Ghost may use installed breaker programs: pay to boost a breaker's strength (boosts last for this one encounter), and once its strength is at least the ICE's strength, pay to break subroutines one at a time. A breaker only works on its own ICE type.
-3. **Subroutines fire.** Every unbroken subroutine resolves in order. "End the run" stops the run right there.
-4. **Passed.** After getting past a piece of ICE the Ghost may **jack out** (end the run with no penalty) or continue to the next one.
-5. **Reach the node.** With no ICE left, the Corp gets one last window to activate assets and upgrades (anywhere), even mid-run. Then active upgrades in the node that trigger "when a run gets past all its ICE" resolve. This window always happens, so a pause here tells the Ghost nothing.
-6. **Access.** If the run is still going it succeeds, and the Ghost accesses cards, one at a time:
-   - a **project** is stolen (some projects charge a cost to steal; the Ghost may decline)
-   - a card with a **trash cost** may be trashed by paying it; otherwise it stays
+1. **Initiation.** Bad publicity credits are added for this run. The Corp gets a window to activate assets and upgrades (anywhere).
+2. **Approach** each ICE. The Corp gets a window: it may activate *this* ICE by paying its cost, and may activate assets and upgrades. ICE can only be activated while it is being approached. If the ICE stays inactive, the Ghost passes it (step 4).
+3. **Encounter** active ICE. Active ICE has a type (wall, cipher or hunter), a strength and subroutines. The Ghost may use installed breakers: pay to boost a breaker's strength (boosts last for this encounter), and once its strength is at least the ICE's strength, pay to break subroutines. A breaker works on the ICE type it names, or on any ICE if it says so. Then every unbroken subroutine resolves in order. "End the run" stops the run right there.
+4. **Movement.** After passing a piece of ICE (encountered, bypassed, or left inactive), and also on a node with no ICE, the Ghost may **jack out** (end the run, no access). If they go on and there is more ICE, the Corp gets a window to activate assets and upgrades, then the Ghost approaches the next ICE (step 2).
+5. **Reach the node.** After the last ICE (or none), the Corp gets one last window to activate assets and upgrades. Then the Ghost approaches the node: active upgrades there that trigger "when the Ghost approaches this node" resolve.
+6. **Success and access.** The run is successful. The Ghost then accesses cards one at a time, **choosing the order**: any card in the node's root (a site's project or asset, and upgrades in any node), and for central nodes the next card from that zone:
+   - **Command**: a random card from the Corp's hand (1 per run, more with some cards)
+   - **Mainframe**: the next card from the top of the deck (1, more with some cards)
+   - **Dump**: every card there turns faceup and is accessed. Cards there cannot be trashed; the app accesses the ones that are not projects at once, since there is nothing to decide about them.
+
+   For each accessed card:
+   - a **project** is stolen (some projects charge a cost to steal; the Ghost may then decline)
+   - a card with a **trash cost** may be trashed by paying it, unless it is in the Dump
    - a **trap** fires when accessed while installed in a site
    - a facedown card the Ghost accessed and left stays known to the Ghost
-   - upgrades in the node are accessed after the normal access, and can be trashed for their trash cost
+   - the Corp does not get to see cards the Ghost accesses from the Mainframe
+
+A Corp window where the Corp has nothing it could activate is skipped; the app makes a declined window look the same.
 
 ## Traces
 
@@ -91,7 +98,7 @@ A card with **recurring credits** refills to its number at the start of its owne
 
 ## Bypass
 
-Some Ghost cards **bypass** ICE: when the Ghost would encounter that ICE, they get past it instead, with no subroutines and no breaking. Only ICE that would actually be encountered counts; inactive ICE the Ghost slips past does not use up a bypass.
+Some Ghost cards **bypass** ICE: when the Ghost would encounter that ICE, they get past it instead, with no subroutines and no breaking. Only ICE that would actually be encountered counts; inactive ICE the Ghost passes does not use up a bypass. After a bypass the Ghost is in the movement step and may jack out.
 
 ## Damage and heat
 

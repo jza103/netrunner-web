@@ -271,14 +271,19 @@ function Game(props: {
   // the bot plays the other side, one step at a time
   useEffect(() => {
     if (!who || myMove) return;
-    const t = setTimeout(() => {
-      try {
-        const r = botStep(state, (side) => side !== me, settings.level);
-        if (r) setState(r.state);
-      } catch (e) {
-        setFailure(e);
-      }
-    }, SPEED_MS[settings.speed]);
+    let r: ReturnType<typeof botStep>;
+    try {
+      r = botStep(state, (side) => side !== me, settings.level);
+    } catch (e) {
+      setFailure(e);
+      return;
+    }
+    if (!r) return;
+    // passing a window plays at once, so it looks the same as a window the engine skipped
+    // because the bot had nothing it could do there (that would otherwise leak hidden cards)
+    const quiet = r.action.type === 'decline';
+    const next = r.state;
+    const t = setTimeout(() => setState(next), quiet ? 0 : SPEED_MS[settings.speed]);
     return () => clearTimeout(t);
   }, [state, settings.speed]);
 
@@ -482,13 +487,15 @@ function Prompt({ v, me, myMove, who }: { v: GameState; me: Side; myMove: boolea
   else if (v.phase === 'run' && v.run) {
     const ice = currentIce(v);
     const name = ice ? (isHidden(ice.card) ? 'facedown ICE' : cardOf(ice.card).name) : '';
-    if (v.run.step === 'approach') text = `The Ghost is running on ${nodeName(v.run.node)} and approaches your ${name}. Activate it (or an asset or upgrade)?`;
+    if (v.run.step === 'approach') text = `The Ghost is running on ${nodeName(v.run.node)} and approaches your ${name}. Activate it, or an asset or upgrade?`;
+    else if (v.run.step === 'initiation') text = `The Ghost starts a run on ${nodeName(v.run.node)}. Activate an asset or upgrade now?`;
+    else if (v.run.step === 'moveIn') text = `The Ghost moves inward on ${nodeName(v.run.node)}. Activate an asset or upgrade now?`;
     else if (v.run.step === 'corpTrash') text = `${name} fires: choose a Ghost program to trash.`;
     else if (v.run.step === 'encounter') text = `You encounter ${name}. Boost and break with a matching breaker, or let the subroutines fire.`;
-    else if (v.run.step === 'passed') text = `You are past ${name}. Continue inward, or jack out?`;
+    else if (v.run.step === 'passed') text = name ? `You are past ${name}. Continue inward, or jack out?` : `You are past the ICE here. Continue inward, or jack out?`;
     else if (v.run.step === 'approachNode')
       text = me === 'corp' ? `The Ghost has reached ${nodeName(v.run.node)}. Last chance to activate assets or upgrades.` : `You reach ${nodeName(v.run.node)}. The Corp may activate cards.`;
-    else if (v.run.step === 'access') text = `You access ${v.run.accessing ? cardOf(v.run.accessing).name : 'a card'}.`;
+    else if (v.run.step === 'access') text = v.run.accessing ? `You access ${cardOf(v.run.accessing).name}.` : 'Choose the next card to access.';
   } else {
     const n = v[me].cycles;
     text = n > 0 ? `Your turn: ${n} cycle${n === 1 ? '' : 's'} left. Tap a card, or pick a move below.` : 'No cycles left. End your turn.';

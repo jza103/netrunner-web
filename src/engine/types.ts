@@ -224,11 +224,17 @@ export interface GhostState {
   known: CardId[];
 }
 
-export type RunStep = 'approach' | 'encounter' | 'passed' | 'corpTrash' | 'approachNode' | 'access';
+/**
+ * Run steps, after the Comprehensive Rules' run phases:
+ * initiation (Corp window) → approach (Corp window, may activate this ICE) → encounter → corpTrash
+ * (a subroutine needs the Corp's choice) → passed (movement: the Ghost may jack out) → moveIn (Corp
+ * window after moving inward) → approach … → approachNode (the Corp's last window) → access.
+ */
+export type RunStep = 'initiation' | 'approach' | 'encounter' | 'passed' | 'corpTrash' | 'moveIn' | 'approachNode' | 'access';
 
 export interface RunState {
   node: NodeId;
-  /** index into node.ice of the ICE being approached or encountered */
+  /** index into node.ice of the ICE being approached, encountered or just passed; -1 once inside the ICE, or on a node with none */
   pos: number;
   step: RunStep;
   /** temporary strength per breaker for this encounter */
@@ -236,7 +242,12 @@ export interface RunState {
   broken: number[];
   /** unbroken subroutines still to fire */
   subQueue: number[];
-  accessQueue: CardId[];
+  /** cards the Ghost may still choose to access by name: the node's root cards and upgrades, and projects in the Dump */
+  candidates: CardId[];
+  /** accesses left from the Corp's hand (Command) or deck (Mainframe), chosen at random or from the top */
+  zoneLeft: number;
+  /** cards already accessed in this breach */
+  accessed: CardId[];
   accessing: CardId | null;
   noActivate: boolean;
   extraAccess: number;
@@ -321,6 +332,8 @@ export type Action =
   | { type: 'proceed' }
   | { type: 'continue' }
   | { type: 'jackOut' }
+  /** during access: choose the next card, by its index in run.candidates, or (zone) the next card from Command or the Mainframe */
+  | { type: 'access'; i?: number; zone?: true }
   | { type: 'steal' }
   | { type: 'trash' }
   | { type: 'leave' }

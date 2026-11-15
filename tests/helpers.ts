@@ -22,6 +22,8 @@ export function actRaw(s: GameState, a: Action): GameState {
  */
 export function act(s: GameState, a: Action): GameState {
   let next = actRaw(s, a);
+  // a run on a node with no ICE stops once for the Ghost to jack out; tests of that use actRaw
+  if (next.run?.step === 'passed' && next.run.pos === -1 && !nodeOf(next, next.run.node).ice.length && a.type !== 'continue') next = actRaw(next, { type: 'continue' });
   if (next.run?.step === 'approachNode') {
     const legal = legalActions(next);
     if (legal.length === 1 && legal[0].type === 'decline') next = actRaw(next, legal[0]);
