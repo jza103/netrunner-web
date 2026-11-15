@@ -118,6 +118,8 @@ Where the rules or a card could be read two ways, this is what the engine does.
 35. **Hosting.** Installing onto Exo Frame is a choice offered alongside a normal install. A hosted program uses no RAM and stays hosted until it leaves play; if the host is trashed, the hosted program is trashed too.
 36. **Press Leak** and Records Request read "your last turn" as the Ghost's most recent completed turn, the same as Lockdown Audit.
 37. **Ghost abilities that cost no cycle** can be used in any window: on either turn, during runs (encounter and movement steps), and in the windows outside runs, unless the card says "on your turn" (Burner Phone).
+38. **Bypass and "when encountered".** A bypass ends the encounter before anything in it happens (CR 6.5.8b), so the ICE's `onEncounter` ability does not fire; `onApproach` already has. ICE with no subroutines can be encountered; there is nothing to break.
+39. **"Break up to N".** One payment breaks the first chosen subroutine; the Ghost then picks up to N-1 more for that payment, or stops. Boosting ends the payment.
 
 ## Status
 

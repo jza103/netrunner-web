@@ -2,7 +2,7 @@ import { Component, type ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import rulesRaw from '../../reference/RULES.md?raw';
 import { apply } from '../engine/actions';
-import { cardOf, defaultSetup, deckList, fullText, identitiesFor, isHidden, poolOf, subText } from '../engine/cards';
+import { breakerText, breaksText, cardOf, defaultSetup, deckList, fullText, identitiesFor, isHidden, poolOf, subText } from '../engine/cards';
 import { builtInPack, deckPool, deckProblems, exportPack, parsePack } from '../engine/pack';
 import { legalActions } from '../engine/legal';
 import { actor, breakerStrength, currentIce, findInstalled, iceStrength, link, maxHand, newGame, nodeName, points, ramLimit, ramUsed } from '../engine/state';
@@ -630,7 +630,7 @@ function RunPanel({ v, open }: { v: GameState; open: (c: CardId) => void }) {
             <div class="small muted">
               Breakers:{' '}
               {breakers.length
-                ? breakers.map((p) => `${cardOf(p).name} (${cardOf(p).breaker!.breaks}, str ${breakerStrength(v, p)})`).join(' · ')
+                ? breakers.map((p) => `${cardOf(p).name} (${breaksText(cardOf(p).breaker!)}, str ${breakerStrength(v, p)})`).join(' · ')
                 : 'none installed'}
             </div>
           )}
@@ -657,7 +657,7 @@ function Rig(props: { v: GameState; open: (c: CardId) => void; hot: (c: CardId) 
           </span>
           {cardOf(c).breaker && (
             <span class="small muted">
-              {cardOf(c).breaker!.breaks} · str {breakerStrength(props.v, c)}
+              {breaksText(cardOf(c).breaker!)} · str {breakerStrength(props.v, c)}
             </span>
           )}
           {(g.hosted[c] || g.virus[c] || g.recurring[c] !== undefined) && (
@@ -720,10 +720,7 @@ function CardBody({ d }: { d: CardDef }) {
         </ol>
       )}
       {d.breaker && (
-        <p class="fulltext">
-          Breaks {d.breaker.breaks === 'any' ? 'any ICE' : `${d.breaker.breaks} ICE`}. {d.breaker.breakCost}¢: break 1 subroutine. {d.breaker.boostCost}¢: +{d.breaker.boostBy} strength for this
-          encounter.
-        </p>
+        <p class="fulltext">{breakerText(d.breaker)}</p>
       )}
       {d.text && <p class="fulltext">{d.text}</p>}
     </>

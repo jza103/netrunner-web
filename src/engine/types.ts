@@ -36,7 +36,7 @@ export type Effect =
   /** shuffle the Dump into the Mainframe */
   | { op: 'recycleDump' }
   /** the Ghost makes a run; `instead` replaces accessing cards when it succeeds; `bypass`: the first N ICE encountered are bypassed */
-  | { op: 'run'; node: 'command' | 'mainframe' | 'dump' | 'any'; extraAccess?: number; noActivate?: boolean; bypass?: number; instead?: Effect[] }
+  | { op: 'run'; node: 'command' | 'mainframe' | 'dump' | 'any'; extraAccess?: number; noActivate?: boolean; bypass?: number; instead?: Effect[]; ifSuccessful?: Effect[] }
   /** trace n: the Corp may pay to raise n, then the Ghost may pay to raise their link; if the trace ends higher, `success` resolves */
   | { op: 'trace'; n: number; success: Effect[] }
   | { op: 'badPublicity'; n: number }
@@ -58,11 +58,18 @@ export type Purpose = 'install' | 'play' | 'develop' | 'activate' | 'activateIce
 export type PlayCondition = 'ghostHasHeat' | 'ghostRanLastTurn';
 
 export interface Breaker {
-  breaks: IceType | 'any';
+  /** the ICE types it can interface with: one, a list, or any ICE (CR 3.9.5h) */
+  breaks: IceType | IceType[] | 'any';
   strength: number;
   boostCost: number;
   boostBy: number;
+  /** boosts last for the rest of the run, not only this encounter (CR 3.9.5c) */
+  boostForRun?: boolean;
   breakCost: number;
+  /** "break up to N subroutines" for one breakCost (default 1) */
+  breakN?: number;
+  /** pay this to break every subroutine on the ICE at once */
+  breakAllCost?: number;
 }
 
 /** An ability on an installed Ghost card, used with the 'use' action. */
@@ -94,6 +101,10 @@ export interface CardDef {
   subtype?: IceType;
   strength?: number;
   subs?: SubOp[];
+  /** ICE, while active: effects when the Ghost approaches it (before the Corp's window), encounters it, or passes it */
+  onApproach?: Effect[];
+  onEncounter?: Effect[];
+  onPass?: Effect[];
   // asset and upgrade
   trash?: number;
   developable?: boolean;
@@ -115,6 +126,10 @@ export interface CardDef {
   onTurnStart?: Effect[];
   // Ghost installed cards
   onFirstSuccessfulRun?: Effect[];
+  /** Ghost installed cards and identity: effects after every successful run */
+  onSuccessfulRun?: Effect[];
+  /** Ghost installed cards and active Corp assets, upgrades and identities: effects when any run ends */
+  onRunEnd?: Effect[];
   ability?: Ability;
   ramBonus?: number;
   handBonus?: number;
@@ -243,6 +258,10 @@ export interface RunState {
   step: RunStep;
   /** temporary strength per breaker for this encounter */
   boost: Record<CardId, number>;
+  /** strength per breaker for the rest of the run (boostForRun breakers) */
+  runBoost: Record<CardId, number>;
+  /** subroutines a breaker may still break from its last payment ("break up to N") */
+  freeBreaks: Record<CardId, number>;
   broken: number[];
   /** unbroken subroutines still to fire */
   subQueue: number[];
@@ -263,6 +282,8 @@ export interface RunState {
   bpCredits: number;
   /** effects that replace accessing cards, and the card they come from */
   instead: Effect[] | null;
+  /** effects when this run succeeds, before access (a stunt's "if successful") */
+  ifSuccessful: Effect[] | null;
   source: string | null;
 }
 
@@ -367,6 +388,9 @@ export type Action =
   | { type: 'use'; card: CardId }
   | { type: 'boost'; card: CardId }
   | { type: 'break'; card: CardId; sub: number }
+  | { type: 'breakAll'; card: CardId }
+  /** stop using the rest of a "break up to N" payment */
+  | { type: 'doneBreaking' }
   | { type: 'proceed' }
   | { type: 'continue' }
   | { type: 'jackOut' }

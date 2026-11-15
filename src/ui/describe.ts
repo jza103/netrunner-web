@@ -1,5 +1,5 @@
 // Words and icons for cards and actions.
-import { cardOf, effectText, isHidden, nameOf } from '../engine/cards';
+import { breaksText, cardOf, effectText, isHidden, nameOf } from '../engine/cards';
 import { currentIce, findInstalled, nodeName, nodeOf } from '../engine/state';
 import type { Action, CardDef, CardId, GameState } from '../engine/types';
 
@@ -32,7 +32,7 @@ export function icon(d: CardDef): string {
 
 export function typeLabel(d: CardDef): string {
   if (d.type === 'ice') return `ICE · ${d.subtype}`;
-  if (d.type === 'program' && d.breaker) return `program · breaks ${d.breaker.breaks === 'any' ? 'any ICE' : d.breaker.breaks}`;
+  if (d.type === 'program' && d.breaker) return `program · breaks ${breaksText(d.breaker)}`;
   if (d.type === 'hidden') return 'facedown';
   return d.type;
 }
@@ -119,10 +119,17 @@ export function describeAction(s: GameState, a: Action): string {
       return `🗑️ Trash ${label(a.card)} (over RAM)`;
     case 'boost': {
       const b = cardOf(a.card).breaker!;
-      return `⬆️ Boost ${label(a.card)} +${b.boostBy} (${b.boostCost}¢)`;
+      return `⬆️ Boost ${label(a.card)} +${b.boostBy}${b.boostForRun ? ' for the run' : ''} (${b.boostCost}¢)`;
     }
-    case 'break':
-      return `🗝️ ${label(a.card)}: break subroutine ${a.sub + 1} (${cardOf(a.card).breaker!.breakCost}¢)`;
+    case 'break': {
+      const b = cardOf(a.card).breaker!;
+      const free = (s.run?.freeBreaks[a.card] ?? 0) > 0;
+      return `🗝️ ${label(a.card)}: break subroutine ${a.sub + 1} (${free ? 'included' : `${b.breakCost}¢${(b.breakN ?? 1) > 1 ? ` for up to ${b.breakN}` : ''}`})`;
+    }
+    case 'breakAll':
+      return `🗝️ ${label(a.card)}: break every subroutine (${cardOf(a.card).breaker!.breakAllCost}¢)`;
+    case 'doneBreaking':
+      return '✋ Stop breaking with this payment';
     case 'proceed':
       return '➡️ Let the remaining subroutines fire';
     case 'continue':

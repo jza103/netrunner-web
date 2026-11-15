@@ -3,7 +3,7 @@
 import { CARDS, cardOf, is, isHidden } from '../engine/cards';
 import { legalActions } from '../engine/legal';
 import { actor, available, breakerStrength, canBreak, currentIce, iceStrength, isSite, link, nodeOf, ramLimit, ramUsed, rigSum } from '../engine/state';
-import type { Action, CardDef, CardId, GameState, NodeId, NodeState, Side } from '../engine/types';
+import type { Action, Breaker, CardDef, CardId, GameState, NodeId, NodeState, Side } from '../engine/types';
 
 /** How hard the bot plays. Hard is the full bot; lower levels drop some of its care. */
 export type BotLevel = 'easy' | 'normal' | 'hard';
@@ -268,15 +268,24 @@ function mustBreak(v: GameState, ice: CardId, broken: number[] = []): number[] {
   return out;
 }
 
+/** What breaking `n` of the ICE's `total` subroutines costs with this breaker, once strong enough: per payment, or all at once. */
+function breakCostFor(b: Breaker, n: number, total: number): { cost: number; all: boolean } {
+  const each = Math.ceil(n / (b.breakN ?? 1)) * b.breakCost;
+  if (b.breakAllCost !== undefined && b.breakAllCost < each && n > 0 && total > 0) return { cost: b.breakAllCost, all: true };
+  return { cost: each, all: false };
+}
+
 /** Cheapest way to break `n` subroutines of this ICE with an installed breaker. */
-function breakPlan(v: GameState, ice: CardId, n: number): { card: CardId; cost: number } | null {
-  let best: { card: CardId; cost: number } | null = null;
+function breakPlan(v: GameState, ice: CardId, n: number): { card: CardId; cost: number; all: boolean } | null {
+  let best: { card: CardId; cost: number; all: boolean } | null = null;
+  const total = (cardOf(ice).subs ?? []).filter((_, i) => !v.run?.broken.includes(i)).length;
   for (const card of v.ghost.programs) {
     if (!canBreak(card, ice)) continue;
     const b = cardOf(card).breaker!;
     const need = Math.max(0, iceStrength(v, ice) - breakerStrength(v, card));
-    const cost = Math.ceil(need / b.boostBy) * b.boostCost + n * b.breakCost;
-    if (!best || cost < best.cost) best = { card, cost };
+    const br = breakCostFor(b, n, total);
+    const cost = Math.ceil(need / b.boostBy) * b.boostCost + br.cost;
+    if (!best || cost < best.cost) best = { card, cost, all: br.all };
   }
   return best;
 }
@@ -320,10 +329,10 @@ function meet(v: GameState, def: CardDef, iceId: CardId | null, budget: number):
   let best: number | null = null;
   for (const card of v.ghost.programs) {
     const b = cardOf(card).breaker;
-    if (!b || (b.breaks !== 'any' && b.breaks !== def.subtype)) continue;
+    if (!b || !(b.breaks === 'any' || b.breaks === def.subtype || (Array.isArray(b.breaks) && b.breaks.includes(def.subtype!)))) continue;
     const strength = iceId ? iceStrength(v, iceId) : (def.strength ?? 0);
     const need = Math.max(0, strength - breakerStrength(v, card));
-    const cost = Math.ceil(need / b.boostBy) * b.boostCost + must.length * b.breakCost;
+    const cost = Math.ceil(need / b.boostBy) * b.boostCost + breakCostFor(b, must.length, subs.length).cost;
     if (best === null || cost < best) best = cost;
   }
   if (best !== null && best <= budget) return { through: true, cost: best, damage: 0 };
@@ -589,7 +598,7 @@ function ghostTurn(v: GameState, legal: Action[]): Action {
     .filter((a): a is Of<'install'> => a.type === 'install' && !!cardOf(a.card).breaker)
     .filter((a) => {
       const b = cardOf(a.card).breaker!;
-      return b.breaks === 'any' ? !(covers('wall') && covers('cipher') && covers('hunter')) : !covers(b.breaks);
+      return b.breaks === 'any' ? !(covers('wall') && covers('cipher') && covers('hunter')) : !(Array.isArray(b.breaks) ? b.breaks : [b.breaks]).every((t) => covers(t));
     })
     .sort((a, b) => (cardOf(a.card).cost ?? 0) - (cardOf(b.card).cost ?? 0));
   if (breakers.length) return breakers[0];
@@ -685,8 +694,16 @@ function ghostRun(v: GameState, legal: Action[]): Action {
     // virus counters lower the ICE before paying to boost
     const termite = pick(legal, 'spendVirus');
     if (termite && must.length && g.programs.some((p) => canBreak(p, ice) && breakerStrength(v, p) < iceStrength(v, ice))) return termite;
-    const act = (plan: { card: CardId }, sub: number): Action | undefined =>
-      pick(legal, 'boost', (a) => a.card === plan.card) ?? pick(legal, 'break', (a) => a.card === plan.card && a.sub === sub);
+    // the rest of a "break up to N" payment: use it on subroutines that matter, then stop
+    if (legal.some((a) => a.type === 'doneBreaking')) {
+      const free = pick(legal, 'break', (a) => must.includes(a.sub));
+      return free ?? pick(legal, 'doneBreaking')!;
+    }
+    const act = (plan: { card: CardId; all: boolean }, sub: number): Action | undefined => {
+      if (breakerStrength(v, plan.card) < iceStrength(v, ice)) return pick(legal, 'boost', (a) => a.card === plan.card);
+      if (plan.all) return pick(legal, 'breakAll', (a) => a.card === plan.card);
+      return pick(legal, 'break', (a) => a.card === plan.card && a.sub === sub);
+    };
     if (must.length) {
       const plan = breakPlan(v, ice, must.length);
       if (plan && plan.cost <= available(v, 'ghost', 'break')) {

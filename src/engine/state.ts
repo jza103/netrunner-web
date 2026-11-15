@@ -219,12 +219,14 @@ export function iceStrength(s: GameState, card: CardId): number {
 export function breakerStrength(s: GameState, card: CardId): number {
   const host = s.ghost.hosted[card];
   const hosted = host ? (cardOf(host).host?.breakerStrength ?? 0) : 0;
-  return (cardOf(card).breaker?.strength ?? 0) + hosted + (s.run?.boost[card] ?? 0);
+  return (cardOf(card).breaker?.strength ?? 0) + hosted + (s.run?.boost[card] ?? 0) + (s.run?.runBoost?.[card] ?? 0);
 }
 
 export function canBreak(card: CardId, ice: CardId): boolean {
   const b = cardOf(card).breaker;
-  return !!b && (b.breaks === 'any' || b.breaks === cardOf(ice).subtype);
+  if (!b) return false;
+  const t = cardOf(ice).subtype!;
+  return b.breaks === 'any' || b.breaks === t || (Array.isArray(b.breaks) && b.breaks.includes(t));
 }
 
 export function canDevelop(card: CardId): boolean {

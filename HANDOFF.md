@@ -75,8 +75,8 @@ The audit compared the CR with `src/engine` (`legal.ts`, `actions.ts`, `state.ts
 
 **Engine limits that block faithful card designs** (not rule differences, but they keep pack cards from working like real Netrunner cards)
 
-- [ ] **2.16 Breaker abilities.** Support the usual patterns: break up to N subroutines for a cost, break all, boost by N, boosts that last for the rest of the run (CR 3.9.5b-c), and several abilities on one breaker. Now: one fixed boost and a fixed per-subroutine break (`breaker` in `types.ts`).
-- [ ] **2.17 ICE and run triggers.** "When approached", "when encountered", "when passed", "when the run ends" and "when a run is successful" abilities (CR 6.4.2, 6.5.2, 6.9.4a, 6.8.5), ICE with no subroutines (CR 6.5.7c), and "if successful" run effects. Add `Effect` hooks for them in the pack format.
+- [x] **2.16 Breaker abilities.** Support the usual patterns: break up to N subroutines for a cost, break all, boost by N, boosts that last for the rest of the run (CR 3.9.5b-c), and several abilities on one breaker. Now: one fixed boost and a fixed per-subroutine break (`breaker` in `types.ts`).
+- [x] **2.17 ICE and run triggers.** "When approached", "when encountered", "when passed", "when the run ends" and "when a run is successful" abilities (CR 6.4.2, 6.5.2, 6.9.4a, 6.8.5), ICE with no subroutines (CR 6.5.7c), and "if successful" run effects. Add `Effect` hooks for them in the pack format.
 
 **Glossary**
 

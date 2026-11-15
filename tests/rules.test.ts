@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { CARDS, cardOf, deckList } from '../src/engine/cards';
 import { legalActions } from '../src/engine/legal';
-import { actor, maxHand, newGame, nodeOf, points } from '../src/engine/state';
+import { actor, breakerStrength, currentIce, iceStrength, maxHand, newGame, nodeOf, points } from '../src/engine/state';
 import { viewFor } from '../src/engine/view';
-import { act, actRaw, blank, corpTurn, ghostTurn, hand, ice, passWindows, rejects, rig, site, take, upgrade } from './helpers';
+import { PLAIN, act, actRaw, blank, corpTurn, ghostTurn, hand, ice, passWindows, rejects, rig, site, take, upgrade } from './helpers';
 import { loadPack } from '../src/engine/pack';
 
 describe('card data', () => {
@@ -341,7 +341,8 @@ describe('runs', () => {
     // Crowbar is strength 1, Bulkhead 4: cannot break yet
     rejects(s, { type: 'break', card: bar, sub: 0 });
     for (let i = 0; i < 3; i++) s = act(s, { type: 'boost', card: bar });
-    rejects(s, { type: 'boost', card: bar });
+    // boosting past the ICE's strength is allowed (CR 3.9.5), just wasted
+    expect(legalActions(s)).toContainEqual({ type: 'boost', card: bar });
     s = act(s, { type: 'break', card: bar, sub: 0 });
     expect(s.ghost.credits).toBe(6);
     rejects(s, { type: 'break', card: bar, sub: 0 });
@@ -354,6 +355,93 @@ describe('runs', () => {
     s = act(s, { type: 'proceed' });
     s = act(s, { type: 'continue' });
     expect(s.run!.step).toBe('access');
+  });
+  it('breaker patterns: break up to N per payment, break all, boosts for the whole run, more than one ICE type', () => {
+    const r = loadPack(
+      {
+        name: 'breakers',
+        cards: [
+          { id: 'fork', name: 'Fork', side: 'ghost', type: 'program', copies: 1, cost: 1, ram: 1, breaker: { breaks: ['wall', 'cipher'], strength: 5, boostCost: 1, boostBy: 1, breakCost: 2, breakN: 2 }, text: '' },
+          { id: 'maul', name: 'Maul', side: 'ghost', type: 'program', copies: 1, cost: 1, ram: 1, breaker: { breaks: 'wall', strength: 0, boostCost: 1, boostBy: 3, boostForRun: true, breakCost: 9, breakAllCost: 1 }, text: '' },
+          { id: 'triple', name: 'Triple Gate', side: 'corp', type: 'ice', subtype: 'cipher', copies: 1, cost: 0, strength: 2, subs: [{ op: 'endRun' }, { op: 'endRun' }, { op: 'endRun' }], text: '' },
+        ],
+      },
+      { checkDecks: false },
+    );
+    if (!r.ok) throw new Error(r.errors.join('; '));
+    let s = newGame({ seed: 1, human: 'ghost', setup: { ...PLAIN, cards: [...PLAIN.cards, ...r.setup.cards], decks: { corp: { ...PLAIN.decks.corp, [r.setup.cards[2].id]: 1 }, ghost: { ...PLAIN.decks.ghost, [r.setup.cards[0].id]: 1, [r.setup.cards[1].id]: 1 } } } });
+    s = act(act(s, { type: 'keep' }), { type: 'keep' });
+    s = ghostTurn(structuredClone(s), 20);
+    for (const side of ['corp', 'ghost'] as const) s[side].deck.push(...s[side].hand.splice(0));
+    const pull = (side: 'corp' | 'ghost', id: string) => s[side].deck.splice(s[side].deck.findIndex((c) => c.startsWith(`${id}#`)), 1)[0];
+    const fork = pull('ghost', r.setup.cards[0].id);
+    const maul = pull('ghost', r.setup.cards[1].id);
+    s.ghost.programs.push(fork, maul);
+    nodeOf(s, 'command').ice.push({ card: pull('corp', r.setup.cards[2].id), active: true, dev: 0 });
+    nodeOf(s, 'command').ice.push({ card: take(s, 'bulkhead'), active: true, dev: 0 });
+    nodeOf(s, 'command').ice.push({ card: take(s, 'monolith'), active: true, dev: 0 });
+    s = act(s, { type: 'run', node: 'command' });
+    // Monolith (wall): Maul boosts +3 for the run, then breaks everything for 1
+    expect(cardOf(currentIce(s)!.card).id).toBe('monolith');
+    while (breakerStrength(s, maul) < iceStrength(s, currentIce(s)!.card)) s = act(s, { type: 'boost', card: maul });
+    const boosted = breakerStrength(s, maul);
+    s = act(s, { type: 'breakAll', card: maul });
+    expect(s.run!.broken).toHaveLength(cardOf(currentIce(s)!.card).subs!.length);
+    s = act(s, { type: 'proceed' });
+    s = act(s, { type: 'continue' });
+    // the run boost stays for the next ICE
+    expect(breakerStrength(s, maul)).toBe(boosted);
+    s = act(s, { type: 'breakAll', card: maul });
+    s = act(s, { type: 'proceed' });
+    s = act(s, { type: 'continue' });
+    // Triple Gate (cipher): Fork breaks 2 for one payment of 2, then 1 more for another 2
+    const credits = s.ghost.credits;
+    s = act(s, { type: 'break', card: fork, sub: 0 });
+    expect(legalActions(s)).toEqual([{ type: 'break', card: fork, sub: 1 }, { type: 'break', card: fork, sub: 2 }, { type: 'doneBreaking' }]);
+    s = act(s, { type: 'break', card: fork, sub: 2 });
+    expect(s.ghost.credits).toBe(credits - 2);
+    s = act(s, { type: 'break', card: fork, sub: 1 });
+    expect(s.ghost.credits).toBe(credits - 4);
+    s = act(s, { type: 'proceed' });
+    expect(s.run!.step).toBe('passed');
+  });
+  it('ICE and run triggers: when approached, encountered and passed; successful runs; run end; "if successful"', () => {
+    const r = loadPack(
+      {
+        name: 'triggers',
+        cards: [
+          { id: 'bell', name: 'Bell', side: 'corp', type: 'ice', subtype: 'wall', copies: 1, cost: 0, strength: 0, subs: [], onApproach: [{ op: 'heat', n: 1 }], onEncounter: [{ op: 'loseCredits', n: 1 }], onPass: [{ op: 'gain', n: 2, who: 'ghost' }], text: '' },
+          { id: 'tally', name: 'Tally', side: 'ghost', type: 'contact', copies: 1, cost: 0, onSuccessfulRun: [{ op: 'gain', n: 1 }], onRunEnd: [{ op: 'draw', n: 1 }], text: '' },
+          { id: 'peek', name: 'Peek', side: 'ghost', type: 'stunt', copies: 1, cost: 0, onPlay: [{ op: 'run', node: 'mainframe', ifSuccessful: [{ op: 'gain', n: 3 }] }], text: '' },
+        ],
+      },
+      { checkDecks: false },
+    );
+    if (!r.ok) throw new Error(r.errors.join('; '));
+    const [bellId, tallyId, peekId] = r.setup.cards.map((c) => c.id);
+    let s = newGame({ seed: 1, human: 'ghost', setup: { ...PLAIN, cards: [...PLAIN.cards, ...r.setup.cards], decks: { corp: { ...PLAIN.decks.corp, [bellId]: 1 }, ghost: { ...PLAIN.decks.ghost, [tallyId]: 1, [peekId]: 1 } } } });
+    s = act(act(s, { type: 'keep' }), { type: 'keep' });
+    s = ghostTurn(structuredClone(s), 5);
+    s.corp.credits = 0;
+    for (const side of ['corp', 'ghost'] as const) s[side].deck.push(...s[side].hand.splice(0));
+    const pull = (side: 'corp' | 'ghost', id: string) => s[side].deck.splice(s[side].deck.findIndex((c) => c.startsWith(`${id}#`)), 1)[0];
+    const bell = pull('corp', bellId);
+    s.ghost.contacts.push(pull('ghost', tallyId));
+    const peek = pull('ghost', peekId);
+    s.ghost.hand.push(peek);
+    nodeOf(s, 'mainframe').ice.push({ card: bell, active: true, dev: 0 });
+    s = act(s, { type: 'play', card: peek, node: 'mainframe' });
+    expect(s.ghost.heat).toBe(1); // approached
+    expect(s.ghost.credits).toBe(4); // encountered: lost 1
+    expect(legalActions(s)).toEqual([{ type: 'proceed' }]); // no subroutines: nothing to break
+    s = act(s, { type: 'proceed' });
+    expect(s.ghost.credits).toBe(6); // passed: +2
+    const handBefore = s.ghost.hand.length;
+    s = act(s, { type: 'continue' });
+    expect(s.ghost.credits).toBe(10); // successful run +1, "if successful" +3
+    s = act(s, legalActions(s).find((a) => a.type === 'leave' || a.type === 'steal')!);
+    expect(s.run).toBeNull();
+    expect(s.ghost.hand.length).toBe(handBefore + 1); // the run ended: Tally draws 1
   });
   it('a breaker only works on its own ICE type; Jackknife works on any', () => {
     let s = ghostTurn(blank(), 10);

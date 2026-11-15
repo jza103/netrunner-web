@@ -42,7 +42,7 @@ Numbers are whole numbers from 0 to 20. Any field not listed here is rejected, w
 
 **project**: `dev` (counters needed), `points`, optional `stealCost` (the Ghost must pay this to steal it), and optional `onScore` effects.
 
-**ice**: `subtype` (`wall`, `cipher` or `hunter`), `strength`, and `subs`, a list of subroutine effects that fire top to bottom unless broken.
+**ice**: `subtype` (`wall`, `cipher` or `hunter`), `strength`, and `subs`, a list of subroutine effects that fire top to bottom unless broken (it may be empty). While active it can also have `onApproach` (when the Ghost approaches it, before the Corp's window), `onEncounter` (when the Ghost encounters it, before any breaking; a bypass stops it) and `onPass` (when the Ghost passes it).
 
 **asset**: `trash` (trash cost), and optionally:
 - `onTurnStart`: fires at the start of the Corp's turn while the asset is active.
@@ -52,7 +52,8 @@ Numbers are whole numbers from 0 to 20. Any field not listed here is rejected, w
 
 **upgrade**: installs in any node. Takes `trash`, and optionally:
 - `iceStrength`: while active, ICE protecting its node gets this much extra strength.
-- `onApproachNode`: while active, fires when a run on its node gets past all the ICE.
+- `onApproachNode`: while active, fires when the Ghost approaches its node during a run (after all the ICE and the Corp's last window).
+- `onRunEnd` (assets and upgrades, while active; also Corp identities): fires when any run ends.
 - `onTurnStart`, `onActivateInRun`, and `trap` with `onAccess`, the same as for assets.
 
 **directive** (Corp) and **stunt** (Ghost): `onPlay` effects, optional `playIf` (`"ghostHasHeat"` or `"ghostRanLastTurn"`). A directive can also have `removeAfterPlay: true`.
@@ -60,7 +61,10 @@ Numbers are whole numbers from 0 to 20. Any field not listed here is rejected, w
 **identity**: never in a deck; chosen when a game starts (a pack's first identity per side is the default). `minDeck` sets the smallest deck it can play with (default 40). It can have `link` (Ghost), `onTurnStart`, `recurring`, `handBonus`, `ramBonus`, `prevent`, `mainframeAccess`, `onFirstSuccessfulRun` (Ghost), `onCorpScore` (Corp: whenever the Corp scores a project) and `onSteal` (Corp: whenever the Ghost steals one).
 
 **program**: `ram`, and optionally `breaker`:
-`{ "breaks": "wall" | "cipher" | "hunter" | "any", "strength": 1, "boostCost": 1, "boostBy": 1, "breakCost": 1 }`
+`{ "breaks": "wall" | "cipher" | "hunter" | ["wall", "cipher"] | "any", "strength": 1, "boostCost": 1, "boostBy": 1, "breakCost": 1 }`, and optionally:
+- `breakN`: subroutines broken for one `breakCost` ("break up to N").
+- `breakAllCost`: pay this to break every subroutine on the ICE at once.
+- `boostForRun`: `true` makes boosts last for the rest of the run instead of the encounter.
 
 **program, gear and contact** can also have:
 - `ramBonus`: extra RAM.
@@ -71,6 +75,8 @@ Numbers are whole numbers from 0 to 20. Any field not listed here is rejected, w
 - `recurring`: `{ "n": 2, "for": "breakers" | "activateIce" | "trace" | "any" }`. Credits that refill at the start of each of the owner's turns and can pay only for that. Assets and upgrades can have this too, for the Corp, while they are active.
 - `onTurnStart`: fires at the start of the Ghost's turn.
 - `onFirstSuccessfulRun`: fires on the first successful run each turn.
+- `onSuccessfulRun`: fires on every successful run, before access.
+- `onRunEnd`: fires when any run ends, successful or not.
 - **Virus programs:** `virusOn` (`central`, `mainframe`, `command`, `dump`, `any`) places a virus counter after each successful run there. Then:
   - `virusAccess: N` gives +1 Mainframe access for every N counters.
   - `virusSpend: true` lets the Ghost spend a counter while encountering ICE, for -1 ICE strength in that encounter.
@@ -99,7 +105,7 @@ An effect is an object with an `op`. Lists of effects resolve in order, and stop
 | `trace` | `n`, `success` (effects) | trace n: the Corp may pay to raise it, then the Ghost may pay to raise their link; if the trace ends higher, `success` resolves |
 | `badPublicity` | `n` | the Corp takes n bad publicity |
 | `clearBadPublicity` | `n` | the Corp removes up to n bad publicity |
-| `run` | `node` (`command`, `mainframe`, `dump`, `any`), `extraAccess`?, `noActivate`?, `bypass`?, `instead`? | make a run. `bypass: N`: the first N ICE encountered are bypassed. `any` lets the player pick the node. `noActivate`: the Corp cannot activate ICE. `instead`: effects that replace accessing cards if the run succeeds. Must be the last effect. |
+| `run` | `node` (`command`, `mainframe`, `dump`, `any`), `extraAccess`?, `noActivate`?, `bypass`?, `instead`?, `ifSuccessful`? | make a run. `bypass: N`: the first N ICE encountered are bypassed. `any` lets the player pick the node. `noActivate`: the Corp cannot activate ICE. `instead`: effects that replace accessing cards if the run succeeds. `ifSuccessful`: effects when the run succeeds, before access. Must be the last effect. |
 | `reveal` | | the Ghost looks at every facedown card in or protecting one node (the player picks it) |
 | `recover` | `types` | return a card of one of these types from the Scrapheap to hand (the player picks it) |
 
@@ -107,7 +113,7 @@ An effect is an object with an `op`. Lists of effects resolve in order, and stop
 
 - **Everywhere:** `gain`, `draw`, `damage`, `heat`, `shedHeat`, `loseCredits`, `drain`, `loseCycle`, `badPublicity`, `clearBadPublicity`.
 - **ICE `subs`:** also `endRun`, `trashProgram`, `payOrEndRun` and `trace`. A trace's `success` may use the everywhere ops plus `endRun`.
-- **`onApproachNode` and `onActivateInRun`:** also `endRun` and `payOrEndRun`.
+- **`onApproachNode`, `onActivateInRun` and the ICE triggers `onApproach`, `onEncounter` and `onPass`:** also `endRun` and `payOrEndRun`.
 - **Corp `onPlay`:** also `develop`, `recycleDump` and `trace`. A trace's `success` here may use only the everywhere ops.
 - **Ghost `onPlay`:** also `run`, `reveal` and `recover`.
 - **One target per card.** A card may have only one effect that needs a target: `develop`, `reveal`, `recover`, or a `run` on `any`.
@@ -117,7 +123,7 @@ An effect is an object with an `op`. Lists of effects resolve in order, and stop
 ```json
 { "id": "toll-booth", "name": "Toll Booth", "side": "corp", "type": "upgrade", "copies": 2, "cost": 0, "trash": 2,
   "onApproachNode": [{ "op": "payOrEndRun", "n": 2 }],
-  "text": "Upgrade. While active: when a run on this node gets past all its ICE, the Ghost loses 2 credits. If they have fewer than 2, the run ends instead." }
+  "text": "Upgrade. While active: when the Ghost approaches this node during a run, they lose 2 credits. If they have fewer than 2, the run ends instead." }
 ```
 
 ```json

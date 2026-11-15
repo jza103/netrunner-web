@@ -5,7 +5,7 @@
 // ("x1a2b3c4d-<id>"), so one id always means one definition and the lookup never changes what a
 // state means: apply() stays a function of its input.
 import raw from '../../data/cards.json';
-import type { CardDef, CardId, Effect, GameSetup, GameState, Side, SubOp } from './types';
+import type { Breaker, CardDef, CardId, Effect, GameSetup, GameState, Side, SubOp } from './types';
 
 export const CARDS: CardDef[] = raw as CardDef[];
 const byId = new Map(CARDS.map((c) => [c.id, c]));
@@ -150,15 +150,25 @@ export function subText(sub: SubOp): string {
   return effectText(sub, 'corp');
 }
 
+/** The ICE types a breaker names, in words. */
+export function breaksText(b: Breaker): string {
+  return b.breaks === 'any' ? 'any ICE' : `${Array.isArray(b.breaks) ? b.breaks.join(' or ') : b.breaks} ICE`;
+}
+
+/** A breaker's abilities in words. */
+export function breakerText(b: Breaker): string {
+  const n = b.breakN ?? 1;
+  const parts = [`Breaks ${breaksText(b)}.`, `${b.breakCost}¢: break ${n === 1 ? '1 subroutine' : `up to ${n} subroutines`}.`];
+  if (b.breakAllCost !== undefined) parts.push(`${b.breakAllCost}¢: break every subroutine.`);
+  parts.push(`${b.boostCost}¢: +${b.boostBy} strength for the rest of this ${b.boostForRun ? 'run' : 'encounter'}.`);
+  return parts.join(' ');
+}
+
 /** Full rules text for display, including generated ICE and breaker lines. */
 export function fullText(def: CardDef): string {
   const parts: string[] = [];
   if (def.subs) parts.push(def.subs.map((s) => `↳ ${subText(s)}`).join(' '));
-  if (def.breaker) {
-    const b = def.breaker;
-    const what = b.breaks === 'any' ? 'any ICE' : `${b.breaks} ICE`;
-    parts.push(`Breaks ${what}. ${b.breakCost}¢: break 1 subroutine. ${b.boostCost}¢: +${b.boostBy} strength for this encounter.`);
-  }
+  if (def.breaker) parts.push(breakerText(def.breaker));
   if (def.text) parts.push(def.text);
   return parts.join(' ');
 }

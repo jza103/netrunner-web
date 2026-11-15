@@ -217,16 +217,17 @@ function runActions(s: GameState): Action[] {
       const ice = currentIce(s)!;
       const def = cardOf(ice.card);
       const out: Action[] = [];
+      const unbroken = def.subs!.map((_, i) => i).filter((i) => !run.broken.includes(i));
+      // the rest of a "break up to N" payment: more breaks with that breaker, or stop
+      const pending = Object.entries(run.freeBreaks).find(([, n]) => n > 0);
+      if (pending && unbroken.length) return [...unbroken.map((sub): Action => ({ type: 'break', card: pending[0], sub })), { type: 'doneBreaking' }];
       for (const card of g.programs) {
         if (!canBreak(card, ice.card)) continue;
         const b = cardOf(card).breaker!;
-        if (breakerStrength(s, card) < iceStrength(s, ice.card)) {
-          if (available(s, 'ghost', 'boost') >= b.boostCost) out.push({ type: 'boost', card });
-        } else if (available(s, 'ghost', 'break') >= b.breakCost) {
-          def.subs!.forEach((_, sub) => {
-            if (!run.broken.includes(sub)) out.push({ type: 'break', card, sub });
-          });
-        }
+        if (available(s, 'ghost', 'boost') >= b.boostCost) out.push({ type: 'boost', card });
+        if (breakerStrength(s, card) < iceStrength(s, ice.card) || !unbroken.length) continue;
+        if (available(s, 'ghost', 'break') >= b.breakCost) for (const sub of unbroken) out.push({ type: 'break', card, sub });
+        if (b.breakAllCost !== undefined && available(s, 'ghost', 'break') >= b.breakAllCost) out.push({ type: 'breakAll', card });
       }
       if (iceStrength(s, ice.card) > 0) for (const card of g.programs) if (cardOf(card).virusSpend && (g.virus[card] ?? 0) > 0) out.push({ type: 'spendVirus', card });
       out.push(...freeAbilities(s));

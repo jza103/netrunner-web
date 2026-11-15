@@ -281,10 +281,12 @@ describe('directives', () => {
 function breakThrough(breaker: string, iceDef: string): number {
   let s = ghostTurn(blank(), 30);
   const [b] = rig(s, breaker);
-  ice(s, 'command', iceDef);
+  const i = ice(s, 'command', iceDef);
   s = act(s, { type: 'run', node: 'command' });
   for (;;) {
-    const a = legalActions(s).find((x) => x.type === 'boost') ?? legalActions(s).find((x) => x.type === 'break');
+    // boost only up to the ICE's strength (boosting further is allowed, but wasted)
+    const weak = breakerStrength(s, b) < iceStrength(s, i);
+    const a = weak ? legalActions(s).find((x) => x.type === 'boost') : legalActions(s).find((x) => x.type === 'break');
     if (!a) break;
     expect('card' in a && a.card).toBe(b);
     s = act(s, a);

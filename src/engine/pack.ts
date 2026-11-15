@@ -33,6 +33,11 @@ const FIELDS: Record<string, CardType[]> = {
   subtype: ['ice'],
   strength: ['ice'],
   subs: ['ice'],
+  onApproach: ['ice'],
+  onEncounter: ['ice'],
+  onPass: ['ice'],
+  onSuccessfulRun: [...INSTALLED_GHOST, 'identity'],
+  onRunEnd: ['asset', 'upgrade', ...INSTALLED_GHOST, 'identity'],
   trash: ['asset', 'upgrade'],
   developable: ['asset'],
   trap: ['asset', 'upgrade'],
@@ -56,12 +61,14 @@ const FIELDS: Record<string, CardType[]> = {
 const COMMON = new Set(['id', 'name', 'side', 'type', 'copies', 'text']);
 
 /** Where an effect list sits decides which ops it may use. */
-type Slot = 'subs' | 'onApproachNode' | 'onActivateInRun' | 'onPlayCorp' | 'onPlayGhost' | 'instead' | 'plain' | 'traceInRun' | 'trace';
+type Slot = 'subs' | 'iceTrigger' | 'onApproachNode' | 'onActivateInRun' | 'onPlayCorp' | 'onPlayGhost' | 'instead' | 'plain' | 'traceInRun' | 'trace';
 
 const ALWAYS = new Set(['gain', 'draw', 'damage', 'heat', 'shedHeat', 'loseCredits', 'drain', 'loseCycle', 'badPublicity', 'clearBadPublicity']);
 const SLOT_OPS: Record<Slot, Set<string>> = {
   subs: new Set([...ALWAYS, 'endRun', 'trashProgram', 'payOrEndRun', 'trace']),
   onApproachNode: new Set([...ALWAYS, 'endRun', 'payOrEndRun']),
+  /** ICE triggers resolve mid-run, so nothing that waits for a choice */
+  iceTrigger: new Set([...ALWAYS, 'endRun', 'payOrEndRun']),
   onActivateInRun: new Set([...ALWAYS, 'endRun', 'payOrEndRun']),
   onPlayCorp: new Set([...ALWAYS, 'develop', 'recycleDump', 'trace']),
   onPlayGhost: new Set([...ALWAYS, 'run', 'reveal', 'recover']),
@@ -85,7 +92,7 @@ const OP_KEYS: Record<string, string[]> = {
   payOrEndRun: ['n'],
   develop: ['n'],
   recycleDump: [],
-  run: ['node', 'extraAccess', 'noActivate', 'bypass', 'instead'],
+  run: ['node', 'extraAccess', 'noActivate', 'bypass', 'instead', 'ifSuccessful'],
   trace: ['n', 'success'],
   badPublicity: ['n'],
   clearBadPublicity: ['n'],
@@ -134,6 +141,7 @@ function checkEffects(list: unknown, slot: Slot, where: string, errs: string[]):
       if (!['command', 'mainframe', 'dump', 'any'].includes(e.node as string)) errs.push(`${at}: node must be command, mainframe, dump or any`);
       if (e.noActivate !== undefined && typeof e.noActivate !== 'boolean') errs.push(`${at}: noActivate must be true or false`);
       if (e.instead !== undefined) checkEffects(e.instead, 'instead', `${at}.instead`, errs);
+      if (e.ifSuccessful !== undefined) checkEffects(e.ifSuccessful, 'instead', `${at}.ifSuccessful`, errs);
       if (i !== list.length - 1) errs.push(`${at}: a run must be the last effect`);
       if (e.node === 'any') targeted++;
     }
@@ -200,7 +208,7 @@ function checkCard(raw: unknown, i: number, errs: string[]): CardDef | null {
   if (type === 'ice') {
     if (!['wall', 'cipher', 'hunter'].includes(raw.subtype as string)) errs.push(`${at}: subtype must be wall, cipher or hunter`);
     if (raw.strength === undefined) errs.push(`${at}: ICE needs a strength`);
-    if (!Array.isArray(raw.subs) || !raw.subs.length) errs.push(`${at}: ICE needs at least one subroutine in "subs"`);
+    if (!Array.isArray(raw.subs)) errs.push(`${at}: ICE needs a list of subroutines in "subs" (it may be empty)`);
   }
   if ((type === 'asset' || type === 'upgrade') && raw.trash === undefined) errs.push(`${at}: a ${type} needs a trash cost`);
   if (type === 'program' && raw.ram === undefined) errs.push(`${at}: a program needs ram`);
@@ -208,13 +216,19 @@ function checkCard(raw: unknown, i: number, errs: string[]): CardDef | null {
   if ((type === 'directive' || type === 'stunt') && !Array.isArray(raw.onPlay)) errs.push(`${at}: a ${type} needs onPlay effects`);
   if (raw.breaker !== undefined) {
     const b = raw.breaker;
+    const types = ['wall', 'cipher', 'hunter'];
+    const breaks = isObj(b) ? b.breaks : undefined;
     const ok =
       isObj(b) &&
-      ['wall', 'cipher', 'hunter', 'any'].includes(b.breaks as string) &&
+      (breaks === 'any' || types.includes(breaks as string) || (Array.isArray(breaks) && breaks.length > 0 && breaks.every((t) => types.includes(t as string)))) &&
       ['strength', 'boostCost', 'boostBy', 'breakCost'].every((k) => isCount(b[k], 20)) &&
       Number(b.boostBy) > 0 &&
-      Object.keys(b).every((k) => ['breaks', 'strength', 'boostCost', 'boostBy', 'breakCost'].includes(k));
-    if (!ok) errs.push(`${at}: breaker needs breaks (wall, cipher, hunter or any), strength, boostCost, boostBy (above 0) and breakCost`);
+      (b.breakN === undefined || (isCount(b.breakN, 10) && Number(b.breakN) >= 1)) &&
+      (b.breakAllCost === undefined || isCount(b.breakAllCost, 20)) &&
+      (b.boostForRun === undefined || typeof b.boostForRun === 'boolean') &&
+      Object.keys(b).every((k) => ['breaks', 'strength', 'boostCost', 'boostBy', 'breakCost', 'breakN', 'breakAllCost', 'boostForRun'].includes(k));
+    if (!ok)
+      errs.push(`${at}: breaker needs breaks (wall, cipher, hunter, a list of them, or any), strength, boostCost, boostBy (above 0) and breakCost; optionally breakN (1 to 10), breakAllCost and boostForRun`);
   }
   if (raw.prevent !== undefined) {
     const p = raw.prevent;
@@ -233,6 +247,11 @@ function checkCard(raw: unknown, i: number, errs: string[]): CardDef | null {
 
   const slots: [string, Slot][] = [
     ['subs', 'subs'],
+    ['onApproach', 'iceTrigger'],
+    ['onEncounter', 'iceTrigger'],
+    ['onPass', 'iceTrigger'],
+    ['onSuccessfulRun', 'plain'],
+    ['onRunEnd', 'plain'],
     ['onApproachNode', 'onApproachNode'],
     ['onActivateInRun', 'onActivateInRun'],
     ['onPlay', side === 'corp' ? 'onPlayCorp' : 'onPlayGhost'],

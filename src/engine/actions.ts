@@ -3,7 +3,7 @@
 import { cardOf, ensureCards, nameOf } from './cards';
 import { conditionHolds, corpRunOptions, isLegal, windowOptions } from './legal';
 import { randInt, shuffle } from './rng';
-import { actor, cloneState, corpSources, currentIce, findInstalled, ghostSources, iceStrength, isSite, link, maxHand, nodeName, nodeOf, points, recurringFor, rigOf, rigSum } from './state';
+import { actor, breakerStrength, cloneState, corpSources, currentIce, findInstalled, ghostSources, iceStrength, isSite, link, maxHand, nodeName, nodeOf, points, recurringFor, rigOf, rigSum } from './state';
 import {
   CYCLES,
   POINTS_TO_WIN,
@@ -245,7 +245,7 @@ export function runEffect(s: GameState, e: Effect, ctx: Ctx): Flow {
       return 'ok';
     }
     case 'run':
-      startRun(s, e.node === 'any' ? ctx.node! : e.node, { noActivate: e.noActivate, extraAccess: e.extraAccess, bypass: e.bypass, instead: e.instead, source: src });
+      startRun(s, e.node === 'any' ? ctx.node! : e.node, { noActivate: e.noActivate, extraAccess: e.extraAccess, bypass: e.bypass, instead: e.instead, ifSuccessful: e.ifSuccessful, source: src });
       return 'stop';
     case 'trace':
       s.trace = { base: e.n, corpBoost: null, success: e.success, source: src, owner: ctx.owner, rest: [], then: 'none' };
@@ -395,6 +395,7 @@ interface RunOpts {
   extraAccess?: number;
   bypass?: number;
   instead?: Effect[];
+  ifSuccessful?: Effect[];
   source?: string;
 }
 
@@ -405,6 +406,8 @@ function startRun(s: GameState, node: NodeId, opts: RunOpts = {}) {
     pos: nodeOf(s, node).ice.length - 1,
     step: 'initiation',
     boost: {},
+    runBoost: {},
+    freeBreaks: {},
     broken: [],
     subQueue: [],
     candidates: [],
@@ -417,6 +420,7 @@ function startRun(s: GameState, node: NodeId, opts: RunOpts = {}) {
     iceMinus: 0,
     bpCredits: s.corp.badPublicity,
     instead: opts.instead?.length ? opts.instead : null,
+    ifSuccessful: opts.ifSuccessful?.length ? opts.ifSuccessful : null,
     source: opts.source ?? null,
   };
   emit(s, 'run', 'ghost', `The Ghost runs on ${nodeName(node)}.`);
@@ -449,8 +453,20 @@ function closeCorpWindow(s: GameState) {
   }
 }
 
+/** Approach the ICE at the Ghost's position: its "when approached" ability (if active), then the Corp's window. */
 function approachIce(s: GameState) {
+  const ice = currentIce(s)!;
+  s.run!.step = 'approach';
+  if (ice.active && iceTrigger(s, ice.card, 'onApproach') !== 'ok') return;
   corpRunWindow(s, 'approach');
+}
+
+/** An active ICE's run trigger; 'stop' when the run or the game ended. */
+function iceTrigger(s: GameState, card: CardId, key: 'onApproach' | 'onEncounter' | 'onPass'): Flow {
+  const fx = cardOf(card)[key];
+  if (!fx?.length) return 'ok';
+  const f = runEffects(s, fx, { owner: 'corp', source: nameOf(card), node: s.run!.node });
+  return f !== 'ok' || !s.run ? 'stop' : 'ok';
 }
 
 /** Movement: the Ghost has passed the ICE at its position (or there was none) and may jack out. */
@@ -458,6 +474,9 @@ function movement(s: GameState) {
   const run = s.run!;
   run.step = 'passed';
   run.iceMinus = 0;
+  run.freeBreaks = {};
+  const ice = currentIce(s);
+  if (ice?.active) iceTrigger(s, ice.card, 'onPass');
 }
 
 /** The Ghost goes on: to the next ICE inward, or to the Corp's last window before the node. */
@@ -483,10 +502,12 @@ function beginEncounter(s: GameState) {
   const run = s.run!;
   run.step = 'encounter';
   run.boost = {};
+  run.freeBreaks = {};
   run.broken = [];
   run.iceMinus = 0;
   const ice = currentIce(s)!;
   const d = cardOf(ice.card);
+  // a bypass ends the encounter before anything in it happens (CR 6.5.8b)
   if (run.bypass > 0) {
     run.bypass--;
     emit(s, 'bypass', 'ghost', `The Ghost bypasses ${d.name}.`);
@@ -494,6 +515,7 @@ function beginEncounter(s: GameState) {
   }
   const str = iceStrength(s, ice.card);
   emit(s, 'encounter', 'ghost', `The Ghost encounters ${d.name} (${d.subtype}, strength ${str}${str !== d.strength ? `, boosted from ${d.strength}` : ''}).`);
+  iceTrigger(s, ice.card, 'onEncounter');
 }
 
 function endRun(s: GameState, success: boolean, why = '') {
@@ -501,6 +523,9 @@ function endRun(s: GameState, success: boolean, why = '') {
   s.run = null;
   s.phase = 'action';
   if (!success) emit(s, 'runEnd', 'ghost', `The run ends${why ? `: ${why}` : '.'}`);
+  // "when the run ends" abilities resolve once the run is over
+  for (const c of ghostSources(s)) if (runEffects(s, cardOf(c).onRunEnd, { owner: 'ghost', source: nameOf(c) }) !== 'ok') return;
+  for (const c of corpSources(s)) if (runEffects(s, cardOf(c).onRunEnd, { owner: 'corp', source: nameOf(c) }) !== 'ok') return;
 }
 
 function resolveSubs(s: GameState) {
@@ -528,6 +553,9 @@ function beginAccess(s: GameState) {
   s.flags.successfulRun = true;
   emit(s, 'success', 'ghost', `The run on ${nodeName(run.node)} succeeds.`);
   if (first) for (const card of ghostSources(s)) runEffects(s, cardOf(card).onFirstSuccessfulRun, { owner: 'ghost', source: nameOf(card) });
+  for (const card of ghostSources(s)) runEffects(s, cardOf(card).onSuccessfulRun, { owner: 'ghost', source: nameOf(card) });
+  if (run.ifSuccessful) runEffects(s, run.ifSuccessful, { owner: 'ghost', source: run.source ?? 'The run' });
+  if (s.phase === 'gameOver') return;
   // virus programs grow on successful runs
   for (const card of s.ghost.programs) {
     const on = cardOf(card).virusOn;
@@ -818,18 +846,42 @@ function step(s: GameState, a: Action) {
       return useAbility(s, a.card);
     case 'boost': {
       const b = cardOf(a.card).breaker!;
+      const run = s.run!;
       pay(s, 'ghost', b.boostCost, 'boost');
-      s.run!.boost[a.card] = (s.run!.boost[a.card] ?? 0) + b.boostBy;
-      emit(s, 'boost', 'ghost', `The Ghost pays ${b.boostCost} to boost ${nameOf(a.card)} to strength ${b.strength + s.run!.boost[a.card]}.`);
+      const into = b.boostForRun ? run.runBoost : run.boost;
+      into[a.card] = (into[a.card] ?? 0) + b.boostBy;
+      run.freeBreaks = {};
+      emit(s, 'boost', 'ghost', `The Ghost pays ${b.boostCost} to boost ${nameOf(a.card)} to strength ${breakerStrength(s, a.card)}${b.boostForRun ? ' for the rest of the run' : ''}.`);
       return;
     }
     case 'break': {
       const b = cardOf(a.card).breaker!;
-      pay(s, 'ghost', b.breakCost, 'break');
-      s.run!.broken.push(a.sub);
-      emit(s, 'break', 'ghost', `The Ghost pays ${b.breakCost}: ${nameOf(a.card)} breaks subroutine ${a.sub + 1} of ${nameOf(currentIce(s)!.card)}.`);
+      const run = s.run!;
+      const free = (run.freeBreaks[a.card] ?? 0) > 0;
+      if (free) run.freeBreaks[a.card]--;
+      else {
+        pay(s, 'ghost', b.breakCost, 'break');
+        run.freeBreaks = { [a.card]: (b.breakN ?? 1) - 1 };
+      }
+      run.broken.push(a.sub);
+      emit(s, 'break', 'ghost', `${free ? 'The Ghost' : `The Ghost pays ${b.breakCost}:`} ${nameOf(a.card)} breaks subroutine ${a.sub + 1} of ${nameOf(currentIce(s)!.card)}.`);
+      const left = cardOf(currentIce(s)!.card).subs!.some((_, i) => !run.broken.includes(i));
+      if (!left) run.freeBreaks = {};
       return;
     }
+    case 'breakAll': {
+      const b = cardOf(a.card).breaker!;
+      const run = s.run!;
+      pay(s, 'ghost', b.breakAllCost!, 'break');
+      run.freeBreaks = {};
+      const subs = cardOf(currentIce(s)!.card).subs!;
+      run.broken = subs.map((_, i) => i);
+      emit(s, 'break', 'ghost', `The Ghost pays ${b.breakAllCost}: ${nameOf(a.card)} breaks every subroutine of ${nameOf(currentIce(s)!.card)}.`);
+      return;
+    }
+    case 'doneBreaking':
+      s.run!.freeBreaks = {};
+      return;
     case 'proceed': {
       const run = s.run!;
       const d = cardOf(currentIce(s)!.card);

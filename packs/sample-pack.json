@@ -9,7 +9,7 @@
       "text": "" },
     { "id": "toll-booth", "name": "Toll Booth", "side": "corp", "type": "upgrade", "copies": 2, "cost": 0, "trash": 2,
       "onApproachNode": [{ "op": "payOrEndRun", "n": 2 }],
-      "text": "Upgrade. While active: when a run on this node gets past all its ICE, the Ghost loses 2 credits. If they have fewer than 2, the run ends instead." },
+      "text": "Upgrade. While active: when the Ghost approaches this node during a run, they lose 2 credits. If they have fewer than 2, the run ends instead." },
     { "id": "data-farm", "name": "Data Farm", "side": "corp", "type": "asset", "copies": 2, "cost": 2, "trash": 3,
       "onTurnStart": [{ "op": "gain", "n": 1 }, { "op": "draw", "n": 1 }],
       "text": "While active: when your turn begins, gain 1 credit and draw 1 card." },
