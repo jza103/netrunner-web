@@ -8,6 +8,8 @@ The request was a fully playable web app of Netrunner with Null Signal Games' Sy
 
 Why: the assistant that built this does not recreate a specific existing game (its name, cards, text or look), and it does build original games with similar mechanics. Everything else in the request (static site, pure engine, rule-based bot opponent, optional AI narrator, tests, spec and handoff) was followed. If Jason wants different cards or rules, the card data is one JSON file and the rules are small; see `HANDOFF.md`.
 
+**Update (Nov 2026): the rules must be Netrunner's.** Jason's goal is to learn and play Netrunner. Original cards are fine; rule differences are not. The engine is being brought in line with the Null Signal Games Comprehensive Rules; the audit and fix list are task 2 in `HANDOFF.md`. Where this spec or `reference/RULES.md` still describes a Breachline-only rule, the audit wins.
+
 ## Decisions
 
 - **Repo:** `jza103/netrunner-web`, deployable to GitHub Pages at `/netrunner-web/`.

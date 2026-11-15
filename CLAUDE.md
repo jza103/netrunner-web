@@ -4,6 +4,7 @@ Single-player cyber-heist card game on GitHub Pages: the human plays the Ghost o
 
 ## Non-negotiables
 - **This is an original game.** Do not add card names, card text, identities, factions or art from Netrunner or any other published game. New cards are new designs.
+- **The rules are Netrunner's rules.** The point of this app is for Jason to learn and play Netrunner. Only the cards are original; every rule must match the Null Signal Games Netrunner Comprehensive Rules (see `HANDOFF.md` task 2 for the version and the audit). Do not simplify or change a rule. Better-game ideas go to a separate 2.0 project. Describe rules in our own words; do not copy CR text.
 - **The engine decides everything.** All state changes go through `apply(state, action)` in `src/engine`. It is pure: no DOM, no mutation of its input, all randomness from the seeded `rngState`.
 - **`legalActions` is the single source of truth.** `apply` accepts exactly what it lists. Add a move there first.
 - **The Operator never changes game state** and only ever sees `viewFor(state, human)`. Keep the tests that check this.
