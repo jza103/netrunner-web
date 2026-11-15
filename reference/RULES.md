@@ -113,6 +113,20 @@ Some Ghost cards **bypass** ICE: when the Ghost would encounter that ICE, they g
   - Cards that prevent damage name the kind they prevent.
 - **Heat**: a counter on the Ghost. Some Corp cards only work, or work harder, while the Ghost has heat. The Ghost sheds heat with 1 cycle and 2 credits each.
 
+## Netrunner terms
+
+Breachline plays by the Netrunner rules with its own cards and its own names for things. When you sit down at a real Netrunner table, these are the words you will hear:
+
+- **Ghost** → Runner. **Corp** → Corp.
+- **cycle** → click. **activate** (a Corp card) → rez. **inactive / facedown** → unrezzed.
+- **develop**, **development counter** → advance, advancement counter. **project**, **project points** → agenda, agenda points.
+- **node** → server. **Command** → HQ. **Mainframe** → R&D. **Dump** → Archives. **site** → remote server. A card in a site → a card in that server's root.
+- **wall / cipher / hunter** → barrier / code gate / sentry. **breaker** → icebreaker.
+- **trap** → ambush. **directive** → operation. **stunt** → event. **gear** → hardware. **contact** → resource.
+- **Scrapheap** → heap. **the Ghost's deck** → stack. **the Ghost's hand** → grip. **rig** → rig.
+- **heat** → tag; **shed heat** → remove a tag. **core damage** → core damage (older cards say brain damage).
+- **RAM** → memory units (MU). **link**, **trace**, **bad publicity**, **recurring credits**, **virus**, **purge**, **bypass**, **jack out**, **access**, **steal**, **trash cost**, **flatline** → the same words.
+
 ## Strategy notes
 
 **Ghost**
